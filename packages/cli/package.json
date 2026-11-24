@@ -1,0 +1,9 @@
+{
+  "name": "@zeko/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Keep a local coding agent connected to Zeko.",
+  "bin": { "zeko": "./zeko.mjs" },
+  "files": ["zeko.mjs"],
+  "engines": { "node": ">=20.9" }
+}

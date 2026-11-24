@@ -1,0 +1,341 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* Dark editor: the canvas is the darkest layer, panels float above it. */
+  --color-table: #0b0b0d;
+  --color-lightbox: #141517;
+  --color-panel: #1b1c1f;
+  --color-wash: #242529;
+  --color-ink: #f1f1f3;
+  --color-on-ink: #0b0b0d;
+  --color-slate: #a1a2a8;
+  --color-mist: #6b6c73;
+  --color-hair: #2a2b2f;
+  --color-hair-soft: #1f2023;
+  --color-grease: #ff3d61;
+  --color-grease-deep: #e8294e;
+  --color-grease-soft: rgb(255 61 97 / 0.14);
+  --color-live: #3ddc97;
+
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --text-2xs: 10.5px;
+  --text-2xs--line-height: 14px;
+  --text-xs: 11.5px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+
+  --shadow-lift: 0 0 0 1px rgb(255 255 255 / 0.06), 0 10px 28px -10px rgb(0 0 0 / 0.7);
+  --shadow-slide: 0 0 0 1px rgb(255 255 255 / 0.07), 0 24px 60px -24px rgb(0 0 0 / 0.9);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.09), 0 18px 44px -12px rgb(0 0 0 / 0.85);
+  --shadow-float: 0 0 0 1px rgb(255 255 255 / 0.07), inset 0 1px 0 0 rgb(255 255 255 / 0.05), 0 20px 48px -20px rgb(0 0 0 / 0.9);
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  color-scheme: dark;
+  background: var(--color-table);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+/* In the base layer so a utility like outline-none can turn it off where a box shows focus its own way. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid rgb(255 255 255 / 0.5);
+    outline-offset: 1px;
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+button {
+  cursor: default;
+}
+
+/* Entrances for things a person just opened. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.96); }
+}
+@keyframes fade {
+  from { opacity: 0; }
+}
+.toast-in { animation: rise 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.menu-in { animation: pop 110ms ease-out; transform-origin: top left; }
+.dialog-in { animation: pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.fade-in { animation: fade 140ms ease-out; }
+.rise-in { animation: rise 260ms cubic-bezier(0.2, 0.9, 0.3, 1) 400ms both; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.08); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgb(255 255 255 / 0.16); }
+::-webkit-scrollbar-track { background: transparent; }
+
+::selection {
+  background: var(--color-grease-soft);
+}
+
+@keyframes agent-frame-activity {
+  0%, 100% { opacity: 0.23; transform: scale(0.75); }
+  42% { opacity: 1; transform: scale(1); }
+  70% { opacity: 0.48; transform: scale(0.9); }
+}
+.agent-frame-activity > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 5px currentColor;
+  animation: agent-frame-activity 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-frame-activity > span { animation: none; opacity: 0.7; }
+  .agent-frame-activity > span:nth-child(3n) { opacity: 0.35; }
+  * {
+    transition-duration: 0ms !important;
+  }
+}
+
+.panel {
+  background: rgb(20 21 23 / 0.92);
+  backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--shadow-float);
+  border-radius: 12px;
+}
+
+.studio {
+  --chrome-divider: rgb(255 255 255 / 0.09);
+  --chrome-hover: rgb(255 255 255 / 0.075);
+  --chrome-selected: rgb(255 255 255 / 0.11);
+  --chrome-ease: cubic-bezier(0.2, 0.75, 0.3, 1);
+}
+
+.studio .panel {
+  background: rgb(24 25 28 / 0.96);
+  box-shadow: 0 0 0 1px var(--chrome-divider), 0 8px 22px -9px rgb(0 0 0 / 0.8);
+}
+
+.studio .panel.right-panel {
+  --inspector-bg: #15161a;
+  --inspector-card: #1c1d23;
+  background: var(--inspector-bg);
+}
+
+.inspector-section + .inspector-section {
+  border-top: 1px solid var(--chrome-divider);
+}
+
+.inspector-swatch {
+  background: repeating-conic-gradient(var(--color-wash) 0 25%, var(--color-lightbox) 0 50%) 0 0 / 8px 8px;
+}
+
+.inspector-card {
+  border: 1px solid var(--color-hair);
+  border-radius: 9px;
+  background: var(--inspector-card);
+}
+
+button.inspector-card:hover {
+  background: var(--color-wash);
+}
+
+.editor-divider {
+  border-color: var(--chrome-divider);
+}
+
+.editor-divider[data-slot="separator"] {
+  background: var(--chrome-divider);
+}
+
+.editor-tabs[data-slot="tabs-list"] {
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 0;
+}
+
+.editor-tab {
+  height: 28px;
+  min-width: 29px;
+  flex: none;
+  padding: 0 6px;
+  border: 0;
+}
+
+.editor-tab::after {
+  display: none;
+}
+
+.editor-rail {
+  transition: left 170ms var(--chrome-ease);
+}
+
+.editor-control {
+  color: var(--color-slate);
+  border-radius: 6px;
+  transition: background-color 140ms var(--chrome-ease, ease-out), color 140ms ease-out,
+    box-shadow 140ms ease-out, scale 120ms var(--chrome-ease, ease-out);
+}
+
+.editor-control:not(:disabled):hover {
+  background: var(--chrome-hover, var(--color-wash));
+  color: var(--color-ink);
+}
+
+.editor-control:not(:disabled):active {
+  scale: 0.96;
+}
+
+.editor-control:is([aria-pressed="true"], [aria-selected="true"], [aria-checked="true"]) {
+  background: var(--chrome-selected, var(--color-wash));
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--chrome-divider, var(--color-hair));
+}
+
+.editor-tool[aria-pressed="true"] {
+  background: var(--color-grease-soft);
+  color: #ff7b95;
+  box-shadow: inset 0 0 0 1px rgb(255 61 97 / 0.21);
+}
+
+.editor-tool[aria-pressed="true"]:hover {
+  background: rgb(255 61 97 / 0.2);
+  color: #ff9aaf;
+}
+
+.editor-control.editor-primary {
+  background: #ffdbe3;
+  color: #30141c;
+}
+
+.editor-control.editor-primary:hover {
+  background: #ffecf0;
+  color: #30141c;
+}
+
+.editor-content {
+  animation: fade 125ms ease-out both;
+}
+
+.frame-surface {
+  transition: box-shadow 130ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-in, .editor-content, .fade-in, .menu-in, .rise-in, .toast-in,
+  [data-slot="tooltip-content"], [data-slot="dropdown-menu-content"] {
+    animation: none;
+  }
+  .editor-control:not(:disabled):active {
+    scale: 1;
+  }
+}
+
+@theme inline {
+  --font-heading: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* shadcn's color roles, read from Zeko's own tokens. Zeko is dark only. */
+:root {
+  --background: var(--color-table);
+  --foreground: var(--color-ink);
+  --card: var(--color-panel);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-panel);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-ink);
+  --primary-foreground: var(--color-on-ink);
+  --secondary: var(--color-wash);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-wash);
+  --muted-foreground: var(--color-slate);
+  --accent: var(--color-wash);
+  --accent-foreground: var(--color-ink);
+  --destructive: var(--color-grease);
+  --border: var(--color-hair);
+  --input: var(--color-hair);
+  --ring: var(--color-mist);
+  --chart-1: var(--color-grease);
+  --chart-2: var(--color-live);
+  --chart-3: #5b6cff;
+  --chart-4: #f5a524;
+  --chart-5: var(--color-slate);
+  --radius: 0.5rem;
+  --sidebar: var(--color-lightbox);
+  --sidebar-foreground: var(--color-ink);
+  --sidebar-primary: var(--color-ink);
+  --sidebar-primary-foreground: var(--color-on-ink);
+  --sidebar-accent: var(--color-wash);
+  --sidebar-accent-foreground: var(--color-ink);
+  --sidebar-border: var(--color-hair-soft);
+  --sidebar-ring: var(--color-mist);
+}
