@@ -1,4 +1,5 @@
 import 'server-only'
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
@@ -40,8 +41,14 @@ const validId = (id: string) => /^[\w-]{1,40}$/.test(id)
 
 function writeAtomic(file: string, data: string) {
   mkdirSync(join(file, '..'), { recursive: true })
-  writeFileSync(`${file}.tmp`, data)
-  renameSync(`${file}.tmp`, file)
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporary, data)
+    renameSync(temporary, file)
+  } catch (error) {
+    rmSync(temporary, { force: true })
+    throw error
+  }
 }
 
 function stamp(board: Board): Board {
