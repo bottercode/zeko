@@ -12,7 +12,7 @@ import { readAcpSelection } from '@/lib/acp'
 async function handleGet(_request: Request) {
   await connection()
   await prepareStore()
-  return Response.json({ canvases: listBoards(), agents: knownAgents(), storage: storageMode })
+  return Response.json({ canvases: listBoards(), agents: knownAgents(), storage: storageMode, hosted: process.env.ZEKO_HOSTED === '1' })
 }
 
 interface CreateBody {

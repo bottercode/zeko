@@ -72,6 +72,18 @@ Choose an agent in the Agents panel and sign in to its local CLI if needed. Zeko
 
 Zeko reads models, thinking effort, and other session settings from the selected agent over ACP. The model picker keeps older versions under **More models** and caches its options between chats. Use **Refresh models** to check the agent again. Replies, thinking, and tool activity update live through the Vercel AI SDK. **Stop reply** cancels the active turn. Chats and their selected settings are saved with the canvas.
 
+## Zeko CLI
+
+Install Node.js 20.9 or later, then install the CLI from the GitHub release.
+
+```bash
+npm install -g "https://github.com/bottercode/zeko/releases/download/cli-v0.2.0/zeko-cli-0.2.0.tgz"
+```
+
+Open a canvas and select **Connect an agent → Zeko CLI**. The dialog provides commands for Codex or Claude Code. For hosted Zeko, `zeko connect` saves the workspace token on your computer, and `zeko launch` starts your coding agent with that canvas attached. Run the launch command in the repository you want your agent to work on.
+
+The CLI companion reconnects when Zeko restarts. Use `zeko agent status` and `zeko agent stop` to manage it, passing the same `--url` and `--provider` you used to launch. For local Zeko, use `zeko launch --url http://localhost:4747`. Hosted tokens expire after 30 days. Run the connection step again to refresh one.
+
 ## External MCP connection
 
 Use the **MCP** button to connect an external client. Zeko serves MCP over Streamable HTTP at `/api/mcp`. Add `?as=<name>` so the board knows who is working, and append `&board=<canvas-id>` to pin the connection to a canvas.

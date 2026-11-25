@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowUp,
+  ArrowUpRight,
   Copy,
   FolderOpen,
   Hourglass,
@@ -22,12 +23,14 @@ import {
 } from 'lucide-react'
 import { acpAgent, type AcpAgentId } from '@/lib/acp'
 import { agentIsOnline } from '@/lib/ops'
-import { SAMPLE_ID } from '@/lib/seed'
+import { SAMPLE_ID, seedBoard } from '@/lib/seed'
 import { ago, useNow } from '@/lib/client/useBoard'
 import { AgentAvatar } from './AgentAvatar'
 import { ConnectDialog } from './ConnectDialog'
 import { ChoiceSelect } from './ChoiceSelect'
 import { Button } from './ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
+import { Field, FieldGroup, FieldLabel } from './ui/field'
 import { Input } from './ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from './ui/input-group'
 import { Skeleton } from './ui/skeleton'
@@ -80,15 +83,18 @@ function HomeInner({ account }: { account?: ReactNode }) {
   const toast = useToast()
   const now = useNow()
   const [canvases, setCanvases] = useState<Canvas[] | null>(null)
-  const [storage, setStorage] = useState<'local' | 'postgres'>('local')
+  const [hosted, setHosted] = useState(false)
   const [presence, setPresence] = useState<SeenAgent[]>([])
   const [offline, setOffline] = useState(false)
-  const [sidebar, setSidebar] = useState(true)
+  const [sidebar, setSidebar] = useState<boolean | null>(null)
   const [view, setView] = useState<View>('all')
   const [sort, setSort] = useState<Sort>('edited')
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [filter, setFilter] = useState('')
   const [connectOpen, setConnectOpen] = useState(false)
+  const [newCanvasOpen, setNewCanvasOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
   const [menu, setMenu] = useState<{ x: number; y: number; items: (MenuItem | 'divider')[] } | null>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; confirm: string; onConfirm: () => void } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -99,9 +105,9 @@ function HomeInner({ account }: { account?: ReactNode }) {
     try {
       const res = await fetch('/api/boards', { cache: 'no-store' })
       if (!res.ok) throw new Error('Could not load canvases')
-      const data = (await res.json()) as { canvases: Canvas[]; storage?: 'local' | 'postgres' }
+      const data = (await res.json()) as { canvases: Canvas[]; hosted?: boolean }
       setCanvases(data.canvases)
-      setStorage(data.storage ?? 'local')
+      setHosted(data.hosted === true)
       setOffline(false)
     } catch {
       setOffline(true)
@@ -128,13 +134,24 @@ function HomeInner({ account }: { account?: ReactNode }) {
   }, [])
 
   const create = async (body: Record<string, unknown>) => {
-    const res = await fetch('/api/boards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
-    if (!res.ok || !data.id) {
-      toast(data.error ?? 'Couldn’t make the canvas.')
-      return
+    if (creatingRef.current) return
+    creatingRef.current = true
+    setCreating(true)
+    try {
+      const res = await fetch('/api/boards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
+      if (!res.ok || !data.id) {
+        toast(data.error ?? 'Couldn’t make the canvas.')
+        return
+      }
+      setNewCanvasOpen(false)
+      router.push(`/c/${data.id}${body.sample === 'open' ? '?welcome=sample' : ''}`)
+    } catch {
+      toast('Couldn’t reach Zeko. Try again.')
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
     }
-    router.push(`/c/${data.id}`)
   }
 
   const importFile = async (f: File) => {
@@ -215,12 +232,15 @@ function HomeInner({ account }: { account?: ReactNode }) {
     .filter((c) => !q || c.name.toLowerCase().includes(q))
     .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt))
   const waiting = (canvases ?? []).filter((c) => c.openTasks > 0).length
+  const firstRun = canvases !== null && canvases.length === 0
 
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      {sidebar ? (
-        <aside className="flex w-[232px] shrink-0 flex-col border-r border-hair-soft bg-lightbox">
+        <aside className={cx(
+          'w-[232px] shrink-0 flex-col border-r border-hair-soft bg-lightbox max-sm:absolute max-sm:inset-y-0 max-sm:left-0 max-sm:z-20',
+          sidebar === false ? 'hidden' : sidebar === true ? 'flex' : 'hidden sm:flex',
+        )}>
           <div className="flex h-14 items-center gap-2 pr-2 pl-4">
             <Mark size={20} />
             <span className="flex-1 font-semibold tracking-tight">zeko</span>
@@ -268,32 +288,23 @@ function HomeInner({ account }: { account?: ReactNode }) {
             </li>
           </ul>
 
-          <div className="mt-auto border-t border-hair-soft p-3">
-            <div className="flex items-center gap-2.5">
-              <span className="grid size-7 place-items-center rounded-full bg-[#5b6cff] text-xs font-semibold text-white">Y</span>
-              <div className="min-w-0">
-                <p className="text-sm">You</p>
-                <p className="truncate text-2xs text-mist">{storage === 'postgres' ? 'Saved in PostgreSQL' : 'Saved on this computer'}</p>
-              </div>
-            </div>
+          <div className="mt-auto">
             {account}
           </div>
         </aside>
-      ) : (
-        <div className="absolute top-3 left-3 z-10">
+        <div className={cx('absolute top-3 left-3 z-10', sidebar === true ? 'hidden' : sidebar === null ? 'sm:hidden' : '')}>
           <Tip label="Show the sidebar" side="right">
             <button aria-label="Show the sidebar" onClick={() => setSidebar(true)} className="panel grid size-9 place-items-center text-slate hover:text-ink">
               <PanelLeftOpen size={15} />
             </button>
           </Tip>
         </div>
-      )}
 
       {/* Main */}
       <main className="relative min-w-0 flex-1 overflow-auto">
         <div className="absolute top-3 right-4 z-10 flex items-center gap-2">
-          <Button variant="outline" size="lg" onClick={() => file.current?.click()}><Upload data-icon="inline-start" aria-hidden /> Import</Button>
-          <Button size="lg" onClick={() => void create({})}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>
+          <Button disabled={creating} variant="outline" size="lg" onClick={() => file.current?.click()}><Upload data-icon="inline-start" aria-hidden /> Import</Button>
+          {!firstRun && <Button size="lg" disabled={creating} onClick={() => setNewCanvasOpen(true)}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>}
           <input
             ref={file}
             type="file"
@@ -307,11 +318,15 @@ function HomeInner({ account }: { account?: ReactNode }) {
           />
         </div>
 
-        <Hero onCreate={create} />
+        {firstRun ? (
+          <FirstCanvas busy={creating} onNew={() => setNewCanvasOpen(true)} onSample={() => void create({ sample: 'open' })} />
+        ) : canvases !== null && !hosted ? (
+          <Hero onCreate={create} />
+        ) : null}
 
         {/* Canvases */}
-        <section className="mx-auto max-w-[1180px] px-8 pb-16">
-          <div className="mb-4 flex items-center gap-3">
+        {!firstRun && <section className={cx('mx-auto max-w-[1180px] px-4 pb-16 sm:px-8', (hosted || canvases === null) && 'pt-20 sm:pt-24')}>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <h2 className="text-[15px] font-semibold">{view === 'waiting' ? 'Waiting on agents' : 'Canvases'}</h2>
             <span className="text-sm text-mist tabular-nums">{shown.length}</span>
             <span className="flex-1" />
@@ -354,7 +369,7 @@ function HomeInner({ account }: { account?: ReactNode }) {
               {canvases && !q && view === 'all' && (
                 <li>
                   <button
-                    onClick={() => void create({})}
+                    onClick={() => setNewCanvasOpen(true)}
                     className="flex h-[214px] w-full flex-col items-center justify-center gap-2 rounded-xl text-sm text-slate shadow-[inset_0_0_0_1px_var(--color-hair)] [background-image:radial-gradient(var(--color-hair)_1px,transparent_1px)] [background-size:16px_16px] hover:text-ink hover:shadow-[inset_0_0_0_1px_var(--color-mist)]"
                   >
                     <span className="grid size-8 place-items-center rounded-full bg-wash">
@@ -400,13 +415,70 @@ function HomeInner({ account }: { account?: ReactNode }) {
               ))}
             </div>
           )}
-        </section>
+        </section>}
       </main>
 
+      <Dialog open={newCanvasOpen} onOpenChange={(open) => { if (!creating) setNewCanvasOpen(open) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New canvas</DialogTitle>
+            <DialogDescription>Give your canvas a name. You can rename it any time.</DialogDescription>
+          </DialogHeader>
+          <form className="flex flex-col gap-4" onSubmit={(event) => {
+            event.preventDefault()
+            void create({ name: new FormData(event.currentTarget).get('name') })
+          }}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="new-canvas-name">Canvas name</FieldLabel>
+                <Input id="new-canvas-name" name="name" placeholder="Untitled canvas" maxLength={120} disabled={creating} />
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={creating} onClick={() => setNewCanvasOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create canvas'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       {connectOpen && <ConnectDialog agents={agents} now={now} open={connectOpen} onOpenChange={setConnectOpen} />}
       {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {confirm && <ConfirmDialog {...confirm} onClose={() => setConfirm(null)} />}
     </div>
+  )
+}
+
+function FirstCanvas({ busy, onNew, onSample }: { busy: boolean; onNew: () => void; onSample: () => void }) {
+  const [sample] = useState(() => seedBoard().frames.find((frame) => frame.id === 'pricing-v2'))
+  const preview = sample?.html ? { html: sample.html, w: sample.w, h: sample.h } : null
+
+  return (
+    <section className="mx-auto grid min-h-full w-full max-w-[1250px] items-center gap-10 px-6 py-20 sm:px-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-14 lg:px-12">
+      <div className="max-w-xl">
+        <Mark size={36} />
+        <h1 className="mt-6 text-balance text-4xl leading-[1.06] font-medium tracking-[-0.045em] sm:text-5xl">Make your first canvas</h1>
+        <p className="mt-4 max-w-sm text-pretty text-base leading-relaxed text-muted-foreground">
+          Lay out screens, compare variations, and design with the coding agent you already use.
+        </p>
+        <div className="mt-7 flex flex-wrap gap-2.5">
+          <Button size="lg" disabled={busy} onClick={onNew}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>
+          <Button size="lg" variant="outline" disabled={busy} onClick={onSample}>
+            {busy ? 'Opening…' : 'Explore sample'} <ArrowUpRight data-icon="inline-end" aria-hidden />
+          </Button>
+        </div>
+      </div>
+      <figure className="overflow-hidden rounded-2xl border border-border bg-card shadow-float">
+        <div className="p-5 sm:p-8 [background-image:radial-gradient(var(--color-hair)_1px,transparent_1px)] [background-size:16px_16px]">
+          <div aria-hidden className="overflow-hidden rounded-lg border border-border shadow-float">
+            <Cover cover={preview} className="h-auto aspect-[8/5]" />
+          </div>
+        </div>
+        <figcaption className="flex items-center justify-between gap-3 border-t border-border px-4 py-3.5">
+          <span className="text-sm font-medium">Fernway pricing</span>
+          <span className="text-right text-xs text-muted-foreground">Sample canvas</span>
+        </figcaption>
+      </figure>
+    </section>
   )
 }
 
@@ -587,7 +659,7 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (name: stri
 }
 
 /** The canvas's first screen, scaled down to fit the card. Scripts don't run here. */
-function Cover({ cover }: { cover: Canvas['cover'] }) {
+function Cover({ cover, className }: { cover: Canvas['cover']; className?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   useEffect(() => {
@@ -606,7 +678,7 @@ function Cover({ cover }: { cover: Canvas['cover'] }) {
   }
   const scale = width ? width / cover.w : 0
   return (
-    <div ref={ref} className="relative h-[150px] overflow-hidden bg-white">
+    <div ref={ref} className={cx('relative overflow-hidden bg-white', className ?? 'h-[150px]')}>
       {scale > 0 && (
         <iframe
           title=""

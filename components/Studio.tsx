@@ -9,7 +9,7 @@ import { frameIdOf, noteBridgeHtml, sendToFrame, type ElementInfo, type Hotspot,
 import type { Frame, Op, SketchComponent } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { Canvas } from './Canvas'
-import { GettingStarted, markStep } from './GettingStarted'
+import { GettingStarted } from './GettingStarted'
 import { Loupe } from './Loupe'
 import { LeftPanel } from './LeftPanel'
 import { Player } from './Player'
@@ -53,10 +53,10 @@ function savedSidePanelWidth() {
   }
 }
 
-export function Studio({ boardId }: { boardId: string }) {
+export function Studio({ boardId, sampleGuide }: { boardId: string; sampleGuide?: boolean }) {
   return (
     <ToastProvider>
-      <StudioInner key={boardId} boardId={boardId} />
+      <StudioInner key={boardId} boardId={boardId} sampleGuide={sampleGuide} />
     </ToastProvider>
   )
 }
@@ -69,15 +69,17 @@ interface ConfirmState {
   onConfirm: () => void
 }
 
-function StudioInner({ boardId }: { boardId: string }) {
+function StudioInner({ boardId, sampleGuide }: { boardId: string; sampleGuide?: boolean }) {
   const { board, dispatch, undo, redo, history, connection, reset, importBoard } = useBoard(boardId)
   const now = useNow()
   const toast = useToast()
   const stageRef = useRef<HTMLDivElement>(null)
-  const [leftClosed, setLeftClosed] = useState(false)
-  const [panelClosed, setPanelClosed] = useState(false)
+  const [leftPreference, setLeftClosed] = useState<boolean>()
+  const [panelPreference, setPanelClosed] = useState<boolean>()
   const [preferredPanelWidth, setPreferredPanelWidth] = useState(savedSidePanelWidth)
   const viewport = useSyncExternalStore(subscribeToViewport, viewportWidth, serverViewportWidth)
+  const leftClosed = leftPreference ?? viewport < 768
+  const panelClosed = panelPreference ?? viewport < 900
   const railLeft = leftClosed ? 8 : LEFT_PANEL_WIDTH + 16
   const leftInset = railLeft + 56
   const maxPanelWidth = Math.max(SIDE_PANEL.minWidth, Math.min(SIDE_PANEL.maxWidth, viewport - leftInset - 200))
@@ -285,7 +287,6 @@ function StudioInner({ boardId }: { boardId: string }) {
       const pick = ids ?? selection
       if (pick.length === 2) {
         setLoupe([pick[0]!, pick[1]!])
-        markStep('compare')
         return
       }
       // One frame in a deck: compare it with the variant before it.
@@ -296,7 +297,6 @@ function StudioInner({ boardId }: { boardId: string }) {
         const other = members[i > 0 ? i - 1 : 1]
         if (other) {
           setLoupe([other.id, one.id])
-          markStep('compare')
         }
       }
     },
@@ -556,7 +556,7 @@ function StudioInner({ boardId }: { boardId: string }) {
         <TopBar connection={connection} onImport={importBoard} placeImages={placeImages}
           connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} />
         <LeftPanel closed={leftClosed} onClose={() => setLeftClosed(true)} />
-        <GettingStarted left={railLeft} />
+        {sampleGuide && <GettingStarted left={railLeft} />}
         <CornerControls onReset={reset} right={panelControlsOffset} />
         <SidePanel
           width={panelWidth}

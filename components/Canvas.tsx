@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Circle, Frame as FrameIcon, Globe, Hand, LayoutGrid, Maximize, MessageCircle, Minus, MousePointer2, PanelLeftOpen, PenLine, PenTool, PencilRuler, Plus, Radio, Route, Square, SquareDashedMousePointer, Type } from 'lucide-react'
+import { Circle, Frame as FrameIcon, Globe, Hand, LayoutGrid, Maximize, MessageCircle, Minus, MousePointer2, PanelLeftOpen, PenLine, PenTool, PencilRuler, Plug, Plus, Radio, Route, Square, SquareDashedMousePointer, Type } from 'lucide-react'
 import { AGENT_AWAY_MS, deckFront, visibleFrames } from '@/lib/ops'
 import { FrameCard } from './FrameCard'
 import { LIVE_FRAMES } from '@/lib/features'
@@ -215,19 +215,20 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
 }
 
 function EmptyTable({ leftInset, rightInset }: { leftInset: number; rightInset: number }) {
-  const { addFrame } = useStudio()
+  const { addFrame, openConnect } = useStudio()
   return (
     <div className="pointer-events-none absolute grid place-items-center" style={{ inset: `${CHROME.top}px ${rightInset}px ${CHROME.bottom}px ${leftInset}px` }}>
       <div className="pointer-events-auto flex max-w-sm flex-col items-center text-center">
         <div className="mb-5 grid size-14 place-items-center rounded-2xl bg-panel text-slate shadow-float">
           <PenLine size={22} strokeWidth={1.5} />
         </div>
-        <h2 className="text-lg font-semibold tracking-tight">Nothing on the board yet</h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-slate">
-          Start a sketch or ask for a design in the Agents panel.
+        <h2 className="text-lg font-semibold tracking-tight">Start designing</h2>
+        <p className="mt-1.5 text-pretty text-sm leading-relaxed text-muted-foreground">
+          Connect your coding agent to design on this canvas, or add a sketch yourself.
         </p>
-        <div className="mt-5 flex gap-2">
-          <Button variant="primary" onClick={() => addFrame('sketch')}>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button variant="primary" onClick={openConnect}><Plug size={14} /> Connect an agent</Button>
+          <Button variant="ghost" onClick={() => addFrame('sketch')}>
             <PenLine size={14} /> Add sketch
           </Button>
         </div>

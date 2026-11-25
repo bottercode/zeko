@@ -1,8 +1,9 @@
 {
   "name": "@zeko/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
-  "description": "Keep a local coding agent connected to Zeko.",
+  "description": "Connect Codex and Claude Code to a Zeko canvas.",
+  "repository": { "type": "git", "url": "git+https://github.com/bottercode/zeko.git", "directory": "packages/cli" },
   "bin": { "zeko": "./zeko.mjs" },
   "files": ["zeko.mjs"],
   "engines": { "node": ">=20.9" }

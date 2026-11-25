@@ -46,9 +46,9 @@ export async function proxy(request: NextRequest) {
   if (!read && origin && origin !== publicOrigin.origin) {
     return new NextResponse('Forbidden', { status: 403 })
   }
-  if (pathname === '/api/mcp') {
+  if (pathname === '/api/mcp' || pathname === '/api/agents/companion') {
     const auth = request.headers.get('authorization')
-    if (basicAuthorized(auth)) {
+    if (pathname === '/api/mcp' && basicAuthorized(auth)) {
       headers.set(WORKSPACE_HEADER, 'legacy')
       return NextResponse.next({ request: { headers } })
     }
@@ -56,7 +56,11 @@ export async function proxy(request: NextRequest) {
     const token = bearer
       ? await decode({ token: bearer, secret: process.env.AUTH_SECRET!, salt: MCP_TOKEN_SALT }).catch(() => null)
       : null
-    if (!workspaceId(token?.workspace)) return basicChallenge()
+    if (!workspaceId(token?.workspace)) {
+      return pathname === '/api/mcp'
+        ? basicChallenge()
+        : NextResponse.json({ error: 'Connect with a Zeko workspace token.' }, { status: 401 })
+    }
     headers.set(WORKSPACE_HEADER, token.workspace)
     return NextResponse.next({ request: { headers } })
   }

@@ -196,21 +196,22 @@ function withCompanions(board: Board): Board {
 
 /** Companion presence lasts as long as its live connection and stays out of saved boards. */
 export function connectCompanion(name: string): () => void {
-  const existing = companions().get(name)
+  const store = state()
+  const existing = store.companions.get(name)
   if (existing) existing.clients += 1
   else {
     companions().set(name, { connectedAt: Date.now(), clients: 1 })
     publishCompanions()
   }
   let closed = false
-  return () => {
+  return () => scope.run(store, () => {
     if (closed) return
     closed = true
     const current = companions().get(name)
     if (!current || --current.clients > 0) return
     companions().delete(name)
     publishCompanions()
-  }
+  })
 }
 
 function publishCompanions() {
@@ -404,7 +405,10 @@ export function listBoards(): CanvasSummary[] {
 /** Every agent seen on any canvas, newest first. */
 export function agentPresences(): SeenAgent[] {
   const seen: SeenAgent[] = []
-  const companionCanvas = companions().size ? resolveId() : undefined
+  const { entries, lastOpened } = state()
+  const companionCanvas = companions().size
+    ? lastOpened && entries.has(lastOpened) ? lastOpened : listBoards()[0]?.id
+    : undefined
   if (companionCanvas) {
     for (const [name, { connectedAt }] of companions()) {
       const mcpConnectedAt = Math.max(0, ...[...state().entries.values()].map(({ board }) => board.agents[name]?.mcpConnectedAt ?? 0)) || undefined
