@@ -18,6 +18,7 @@ const proxy = createServer((incoming, response) => {
   }
 
   const headers = { ...incoming.headers }
+  delete headers['x-zeko-workspace']
   if (publicOrigin) {
     headers.host = publicOrigin.host
     headers['x-forwarded-host'] = publicOrigin.host

@@ -1,7 +1,7 @@
-import { createBoard, deleteBoard, dispatch, flushCanvas, getBoard, hasBoard, prepareStore } from '@/lib/server/store'
+import { createBoard, deleteBoard, dispatch, flushCanvas, getBoard, hasBoard, prepareStore, withWorkspace } from '@/lib/server/store'
 
 /** Rename: { name }. Duplicate: { duplicate: true }, which answers with the copy's id. */
-export async function PATCH(request: Request, ctx: RouteContext<'/api/boards/[id]'>) {
+async function handlePatch(request: Request, ctx: RouteContext<'/api/boards/[id]'>) {
   const { id } = await ctx.params
   await prepareStore()
   if (!hasBoard(id)) return Response.json({ error: 'No such canvas.' }, { status: 404 })
@@ -20,10 +20,13 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/boards/[id
 }
 
 /** Archives the canvas in the active storage backend. */
-export async function DELETE(_request: Request, ctx: RouteContext<'/api/boards/[id]'>) {
+async function handleDelete(_request: Request, ctx: RouteContext<'/api/boards/[id]'>) {
   const { id } = await ctx.params
   await prepareStore()
   if (!deleteBoard(id)) return Response.json({ error: 'No such canvas.' }, { status: 404 })
   await flushCanvas(id)
   return new Response(null, { status: 204 })
 }
+
+export const PATCH = withWorkspace(handlePatch)
+export const DELETE = withWorkspace(handleDelete)

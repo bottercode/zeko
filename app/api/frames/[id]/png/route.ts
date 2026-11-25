@@ -1,11 +1,11 @@
 import type { NextRequest } from 'next/server'
-import { getBoard } from '@/lib/server/store'
+import { getBoard, withWorkspace } from '@/lib/server/store'
 import { canvasOf, noCanvas } from '@/lib/server/canvas'
 import { RenderUnavailable, screenshot } from '@/lib/server/render'
 import { withDesignTokens } from '@/lib/tokens'
 
 /** A sketch as a PNG: ?scale=1|2|3, &full=1 for the whole page rather than the frame's size. */
-export async function GET(req: NextRequest, ctx: RouteContext<'/api/frames/[id]/png'>) {
+async function handleGet(req: NextRequest, ctx: RouteContext<'/api/frames/[id]/png'>) {
   const { id } = await ctx.params
   const canvas = await canvasOf(req)
   if (!canvas) return noCanvas()
@@ -26,3 +26,5 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/frames/[id]/
     return Response.json({ error: e instanceof Error ? e.message : 'Rendering failed.' }, { status })
   }
 }
+
+export const GET = withWorkspace(handleGet)

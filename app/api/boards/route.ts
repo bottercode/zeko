@@ -1,6 +1,6 @@
 import { connection } from 'next/server'
 import { nanoid } from 'nanoid'
-import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode } from '@/lib/server/store'
+import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode, withWorkspace } from '@/lib/server/store'
 import type { Board } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
 import { readMemoryRules, readSketchComponents } from '@/lib/ops'
@@ -9,7 +9,7 @@ import { localAgentOrigin, startAgentRequest } from '@/lib/server/agent-runner'
 import { readAcpSelection } from '@/lib/acp'
 
 /** Every canvas, most recently edited first, and the agents seen on any of them. */
-export async function GET() {
+async function handleGet(_request: Request) {
   await connection()
   await prepareStore()
   return Response.json({ canvases: listBoards(), agents: knownAgents(), storage: storageMode })
@@ -29,7 +29,7 @@ interface CreateBody {
 const isList = (v: unknown) => Array.isArray(v)
 
 /** Makes a canvas: empty, the sample, from an exported file, or from a request for agents. */
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   await prepareStore()
   const body = ((await request.json().catch(() => null)) ?? {}) as CreateBody
   if (body.sample === 'open') {
@@ -63,3 +63,6 @@ function nameFrom(prompt: string) {
   const name = words.length > 40 ? `${words.slice(0, 40).trimEnd()}…` : words
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
+
+export const GET = withWorkspace(handleGet)
+export const POST = withWorkspace(handlePost)

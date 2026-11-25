@@ -1,9 +1,9 @@
-import { getBoard } from '@/lib/server/store'
+import { getBoard, withWorkspace } from '@/lib/server/store'
 import { canvasOf, noCanvas } from '@/lib/server/canvas'
 import { framePdf, RenderUnavailable } from '@/lib/server/render'
 import { withDesignTokens } from '@/lib/tokens'
 
-export async function GET(req: Request, ctx: RouteContext<'/api/frames/[id]/pdf'>) {
+async function handleGet(req: Request, ctx: RouteContext<'/api/frames/[id]/pdf'>) {
   const { id } = await ctx.params
   const canvas = await canvasOf(req)
   if (!canvas) return noCanvas()
@@ -22,3 +22,5 @@ export async function GET(req: Request, ctx: RouteContext<'/api/frames/[id]/pdf'
     return Response.json({ error: e instanceof Error ? e.message : 'Rendering failed.' }, { status })
   }
 }
+
+export const GET = withWorkspace(handleGet)

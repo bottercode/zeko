@@ -1,18 +1,18 @@
+export const WORKSPACE_HEADER = 'x-zeko-workspace'
+export const MCP_TOKEN_SALT = 'zeko-mcp-v1'
+
 export function googleAuthConfigured() {
   return Boolean(
     process.env.ZEKO_HOSTED === '1' &&
     process.env.AUTH_URL &&
     process.env.AUTH_SECRET &&
     process.env.AUTH_GOOGLE_ID &&
-    process.env.AUTH_GOOGLE_SECRET &&
-    process.env.ZEKO_ALLOWED_GOOGLE_EMAILS?.trim()
+    process.env.AUTH_GOOGLE_SECRET
   )
 }
 
-export function allowedGoogleEmail(email: unknown) {
-  if (typeof email !== 'string' || !email) return false
-  const allowed = process.env.ZEKO_ALLOWED_GOOGLE_EMAILS?.split(',').map((value) => value.trim().toLowerCase())
-  return allowed?.includes(email.toLowerCase()) ?? false
+export function workspaceId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 }
 
 export function canvasReturnPath(value: unknown) {

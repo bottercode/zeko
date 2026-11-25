@@ -13,7 +13,7 @@ async function SignInForm({ searchParams }: Pick<PageProps<'/login'>, 'searchPar
   if (!googleAuthConfigured()) redirect('/')
   const next = canvasReturnPath(params.next ?? params.callbackUrl)
   const error = params.error === 'AccessDenied'
-    ? 'This Google account does not have access to this workspace.'
+    ? 'Use a verified Google account to sign in.'
     : params.error ? 'Sign-in failed. Try again with your Google account.' : undefined
 
   return (
@@ -37,7 +37,7 @@ export default function Login({ searchParams }: PageProps<'/login'>) {
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">Sign in to Zeko</h1>
-          <p className="text-sm text-muted-foreground">Use your Google account to open your canvases.</p>
+          <p className="text-sm text-muted-foreground">Use your Google account to open your private workspace.</p>
         </div>
         <Suspense fallback={null}>
           <SignInForm searchParams={searchParams} />

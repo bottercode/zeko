@@ -1,5 +1,5 @@
 import { connection } from 'next/server'
-import { dispatch, flushCanvas, getBoard, replaceBoard, resetBoard } from '@/lib/server/store'
+import { dispatch, flushCanvas, getBoard, replaceBoard, resetBoard, withWorkspace } from '@/lib/server/store'
 import { canvasOf, noCanvas } from '@/lib/server/canvas'
 import type { Board, Op } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
@@ -41,14 +41,14 @@ const HUMAN_OPS = new Set<Op['type']>([
   'batch',
 ])
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   await connection()
   const id = await canvasOf(request)
   if (!id) return noCanvas()
   return Response.json({ ...getBoard(id), id })
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const id = await canvasOf(request)
   if (!id) return noCanvas()
   const op = (await request.json().catch(() => null)) as Op | { type: 'task.start'; id: string } | { type: 'task.stop'; id: string } | null
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 }
 
 /** Puts the sample board back. */
-export async function DELETE(request: Request) {
+async function handleDelete(request: Request) {
   const id = await canvasOf(request)
   if (!id) return noCanvas()
   const board = resetBoard(id)
@@ -102,7 +102,7 @@ const isList = (v: unknown) => Array.isArray(v)
 const isMap = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** Replaces the board with an exported one. Checks the shape, not every field. */
-export async function PUT(request: Request) {
+async function handlePut(request: Request) {
   const id = await canvasOf(request)
   if (!id) return noCanvas()
   const raw = (await request.json().catch(() => null)) as Partial<Board> | null
@@ -137,3 +137,8 @@ export async function PUT(request: Request) {
   await flushCanvas(id)
   return Response.json({ version: board.version })
 }
+
+export const GET = withWorkspace(handleGet)
+export const POST = withWorkspace(handlePost)
+export const DELETE = withWorkspace(handleDelete)
+export const PUT = withWorkspace(handlePut)

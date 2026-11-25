@@ -51,7 +51,7 @@ The Dockerfile runs one private Zeko workspace. On Render, set the health check 
 
 ### Google sign-in
 
-Create a Web application OAuth client in Google Auth Platform. Add `https://YOUR_HOST/api/auth/callback/google` to its authorized redirect URIs. If the Google project is in Testing, add the permitted accounts to its test users.
+Create a Web application OAuth client with an External audience in Google Auth Platform. Add `https://YOUR_HOST/api/auth/callback/google` to its authorized redirect URIs.
 
 Add a Render secret file named `zeko-auth.env` and restart the service.
 
@@ -60,12 +60,11 @@ AUTH_URL=https://YOUR_HOST
 AUTH_SECRET=replace-with-a-random-secret
 AUTH_GOOGLE_ID=your-google-client-id
 AUTH_GOOGLE_SECRET=your-google-client-secret
-ZEKO_ALLOWED_GOOGLE_EMAILS=owner@example.com
 ```
 
-Generate `AUTH_SECRET` with `openssl rand -base64 32`. Google sign-in requires a verified email on the allowlist. Separate multiple emails with commas. Everyone on the allowlist can access the same canvases.
+Generate `AUTH_SECRET` with `openssl rand -base64 32`. Zeko requests the standard OpenID profile and email scopes and requires a verified email. Each Google account opens a private workspace. PostgreSQL stores personal canvases in `zeko.account_canvases` and existing local canvases in `zeko.canvases`. The hosted database role needs SELECT, INSERT, and UPDATE on both tables.
 
-Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. External MCP clients use those credentials on `/api/mcp` after Google is enabled. Embedded agent chat requires a local installation with an authenticated agent CLI.
+Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. After setup, Google users can copy a workspace-specific MCP credential from the **MCP** dialog. The previous Basic-auth MCP credentials continue to point to the original workspace, which remains available in a local installation connected to the same database. Embedded agent chat requires a local installation with an authenticated agent CLI.
 
 ## Agent chat
 

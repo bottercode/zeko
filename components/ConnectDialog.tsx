@@ -19,7 +19,7 @@ const CLIENTS = [
     setup: 'Run this in the project where you use Claude Code.',
     check: 'Open Claude Code and check that zeko is enabled in /mcp.',
     copy: 'Copy command',
-    snippet: (url: string) => `claude mcp add --transport http zeko "${url}"`,
+    snippet: (url: string, token?: string) => `claude mcp add --transport http zeko "${url}"${token ? ` --header "Authorization: Bearer ${token}"` : ''}`,
   },
   {
     id: 'codex',
@@ -28,7 +28,9 @@ const CLIENTS = [
     setup: 'Run this in your terminal to register the Zeko canvas with Codex.',
     check: 'Start a new Codex session and check that zeko is enabled in /mcp.',
     copy: 'Copy command',
-    snippet: (url: string) => `codex mcp add zeko --url "${url}"`,
+    snippet: (url: string, token?: string) => token
+      ? `export ZEKO_MCP_TOKEN="${token}"\ncodex mcp add zeko --url "${url}" --bearer-token-env-var ZEKO_MCP_TOKEN`
+      : `codex mcp add zeko --url "${url}"`,
   },
   {
     id: 'cursor',
@@ -37,16 +39,16 @@ const CLIENTS = [
     setup: 'Add the zeko entry under mcpServers in .cursor/mcp.json.',
     check: 'Open Cursor’s MCP settings, enable zeko, and start an Agent chat.',
     copy: 'Copy JSON',
-    snippet: (url: string) => JSON.stringify({ mcpServers: { zeko: { url } } }, null, 2),
+    snippet: (url: string, token?: string) => JSON.stringify({ mcpServers: { zeko: { url, ...(token && { headers: { Authorization: `Bearer ${token}` } }) } } }, null, 2),
   },
   {
     id: 'other',
     name: 'Other',
     agent: 'Agent',
-    setup: 'Add a server named zeko in your client’s MCP settings. Choose Streamable HTTP and paste this URL.',
+    setup: 'Add a server named zeko in your client’s MCP settings. Choose Streamable HTTP.',
     check: 'Save and enable the server in your client.',
     copy: 'Copy URL',
-    snippet: (url: string) => url,
+    snippet: (url: string, token?: string) => token ? `${url}\nAuthorization: Bearer ${token}` : url,
   },
 ] as const
 
@@ -65,7 +67,7 @@ function SetupStep({ number, title, description, children }: { number: number; t
   )
 }
 
-function CopyBlock({ text, action, prompt = false }: { text: string; action: string; prompt?: boolean }) {
+function CopyBlock({ text, display = text, action, prompt = false }: { text: string; display?: string; action: string; prompt?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
@@ -89,7 +91,7 @@ function CopyBlock({ text, action, prompt = false }: { text: string; action: str
         {prompt ? (
           <p className="min-w-0 flex-1 px-0.5 py-1 text-sm leading-relaxed text-ink">{text}</p>
         ) : (
-          <pre className="w-full min-w-0 px-0.5 py-1 font-mono text-xs leading-relaxed wrap-anywhere whitespace-pre-wrap text-ink sm:w-auto sm:flex-1"><code>{text}</code></pre>
+          <pre className="w-full min-w-0 px-0.5 py-1 font-mono text-xs leading-relaxed wrap-anywhere whitespace-pre-wrap text-ink sm:w-auto sm:flex-1"><code>{display}</code></pre>
         )}
         <Button variant={prompt ? 'ghost' : 'secondary'} size="sm" onClick={copy} className="ml-auto min-w-24">
           {state === 'copied' ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
@@ -97,7 +99,7 @@ function CopyBlock({ text, action, prompt = false }: { text: string; action: str
         </Button>
       </div>
       <p role="status" className={state === 'failed' ? 'mt-1.5 text-xs text-slate' : 'sr-only'}>
-        {state === 'failed' ? 'Clipboard unavailable. Select and copy the text above.' : state === 'copied' ? 'Copied to clipboard.' : ''}
+        {state === 'failed' ? display === text ? 'Clipboard unavailable. Select and copy the text above.' : 'Clipboard unavailable. Allow clipboard access and try again.' : state === 'copied' ? 'Copied to clipboard.' : ''}
       </p>
     </div>
   )
@@ -112,6 +114,24 @@ export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas
   canvas?: { id: string; name: string }
 }) {
   const origin = typeof window === 'undefined' ? '' : window.location.origin
+  const hosted = origin.startsWith('https:')
+  const [credential, setCredential] = useState<{ token?: string; error?: boolean } | null>(null)
+
+  useEffect(() => {
+    if (!open || !hosted || credential) return
+    const controller = new AbortController()
+    void fetch('/api/mcp/credential', { method: 'POST', signal: controller.signal })
+      .then(async (response) => {
+        if (response.status === 404) { setCredential({}); return }
+        if (!response.ok) throw new Error('MCP credential unavailable')
+        const { token } = await response.json() as { token: string }
+        setCredential({ token })
+      })
+      .catch(() => { if (!controller.signal.aborted) setCredential({ error: true }) })
+    return () => controller.abort()
+  }, [open, hosted, credential])
+
+  const token = credential?.token
   const prompt = canvas
     ? `Please work on my “${canvas.name}” canvas in Zeko (canvas ID ${canvas.id}). Tell me when you’re ready.`
     : TEST_PROMPT
@@ -153,7 +173,13 @@ export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas
               <TabsContent key={client.id} value={client.id}>
                 <div className="editor-content flex flex-col gap-5 px-4 py-5 sm:px-6">
                   <SetupStep number={1} title="Add Zeko" description={client.setup}>
-                    <CopyBlock text={client.snippet(url)} action={client.copy} />
+                    {hosted && !credential ? (
+                      <p role="status" className="text-sm text-slate">Getting connection details…</p>
+                    ) : credential?.error ? (
+                      <Button variant="outline" onClick={() => setCredential(null)}>Retry</Button>
+                    ) : (
+                      <CopyBlock text={client.snippet(url, token)} display={client.snippet(url, token ? 'YOUR_WORKSPACE_TOKEN' : undefined)} action={token && client.id === 'other' ? 'Copy connection details' : client.copy} />
+                    )}
                   </SetupStep>
                   <SetupStep number={2} title="Check the connection" description={client.check}>
                     <div role="status" className={cx('flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs', online ? 'border-live/20 bg-live/8 text-live' : 'border-hair bg-lightbox text-slate')}>
@@ -165,7 +191,9 @@ export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas
                     <CopyBlock text={prompt} action="Copy prompt" prompt />
                   </SetupStep>
                 </div>
-                <p className="border-t border-hair bg-lightbox/70 px-4 py-3 text-xs text-slate sm:px-6">Keep Zeko running while the agent works.</p>
+                <p className="border-t border-hair bg-lightbox/70 px-4 py-3 text-xs text-slate sm:px-6">
+                  {token ? 'The copied connection includes a private workspace token that expires in 30 days.' : 'Keep Zeko running while the agent works.'}
+                </p>
               </TabsContent>
             )
           })}

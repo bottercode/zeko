@@ -681,4 +681,6 @@ async function route(request: Request) {
   return response
 }
 
-export { route as GET, route as POST, route as DELETE }
+export const GET = store.withWorkspace(route)
+export const POST = GET
+export const DELETE = GET

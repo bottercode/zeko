@@ -1,7 +1,7 @@
 import 'server-only'
+import { createHash } from 'node:crypto'
 import NextAuth from 'next-auth'
 import Google from 'next-auth/providers/google'
-import { allowedGoogleEmail } from '@/lib/auth-access'
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   providers: [Google({ checks: ['pkce', 'state', 'nonce'], allowDangerousEmailAccountLinking: false })],
@@ -11,7 +11,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   useSecureCookies: true,
   callbacks: {
     signIn({ account, profile }) {
-      return account?.provider === 'google' && profile?.email_verified === true && allowedGoogleEmail(profile.email)
+      return account?.provider === 'google' && !!account.providerAccountId && profile?.email_verified === true
+    },
+    jwt({ token, account }) {
+      if (account?.provider === 'google') {
+        token.workspace = createHash('sha256').update(account.providerAccountId).digest('hex')
+      }
+      return token
     },
   },
 }))

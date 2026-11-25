@@ -1,6 +1,7 @@
 import 'server-only'
 import { existsSync } from 'node:fs'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import { personalWorkspace } from './store'
 
 /* Draws sketches in a headless Chrome so agents can look at their work and people can export it.
    Uses the Chrome already on the machine; set ZEKO_CHROME to point somewhere else. */
@@ -46,7 +47,17 @@ export async function withSketchPage<T>(fn: (page: Page) => Promise<T>): Promise
   const b = await browser()
   const context = await b.createBrowserContext()
   try {
-    return await fn(await context.newPage())
+    const page = await context.newPage()
+    if (personalWorkspace()) {
+      await page.setJavaScriptEnabled(false)
+      await page.setOfflineMode(true)
+      await page.setRequestInterception(true)
+      page.on('request', (request) => {
+        const embedded = /^(?:data:|blob:|about:blank$)/.test(request.url())
+        void (embedded ? request.continue() : request.abort()).catch(() => undefined)
+      })
+    }
+    return await fn(page)
   } finally {
     await context.close().catch(() => undefined)
   }

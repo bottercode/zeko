@@ -3,7 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { connectDatabase } from '../db/connection'
-import { canvases } from '../db/schema'
+import { accountCanvases, canvases } from '../db/schema'
 import type { Board } from '../types'
 
 type CanvasRow = typeof canvases.$inferSelect
@@ -12,15 +12,17 @@ type Queue = { next?: CanvasRow; writing?: CanvasRow; running?: Promise<void>; t
 export class CanvasWriteConflict extends Error {}
 
 /** Serialize writes per canvas. Keep the pending write ID on failure so an uncertain commit can be retried. */
-export function databasePersistence(connectionString: string) {
-  const { db } = connectDatabase(connectionString)
+export function databasePersistence(db: ReturnType<typeof connectDatabase>['db'], ownerId?: string) {
+  const table = ownerId ? accountCanvases : canvases
+  const owner = ownerId ? eq(accountCanvases.ownerId, ownerId) : undefined
+  const canvasId = (id: string) => and(owner, eq(table.id, id))
   const revisions = new Map<string, string>()
   const writes = new Map<string, Queue>()
 
   async function load() {
     const [rows, archived] = await Promise.all([
-      db.select().from(canvases).where(isNull(canvases.archivedAt)),
-      db.select({ id: canvases.id, revision: canvases.revision }).from(canvases).where(isNotNull(canvases.archivedAt)),
+      db.select().from(table).where(and(owner, isNull(table.archivedAt))),
+      db.select({ id: table.id, revision: table.revision }).from(table).where(and(owner, isNotNull(table.archivedAt))),
     ])
     for (const row of archived) revisions.set(row.id, row.revision)
     for (const row of rows) revisions.set(row.id, row.revision)
@@ -30,10 +32,12 @@ export function databasePersistence(connectionString: string) {
   async function save(row: CanvasRow) {
     const revision = revisions.get(row.id)
     const affected = revision
-      ? await db.update(canvases).set(row).where(and(eq(canvases.id, row.id), eq(canvases.revision, revision))).returning({ id: canvases.id })
-      : await db.insert(canvases).values(row).onConflictDoNothing().returning({ id: canvases.id })
+      ? await db.update(table).set(row).where(and(canvasId(row.id), eq(table.revision, revision))).returning({ id: table.id })
+      : ownerId
+        ? await db.insert(accountCanvases).values({ ...row, ownerId }).onConflictDoNothing().returning({ id: table.id })
+        : await db.insert(canvases).values(row).onConflictDoNothing().returning({ id: table.id })
     if (!affected.length) {
-      const [stored] = await db.select({ revision: canvases.revision }).from(canvases).where(eq(canvases.id, row.id))
+      const [stored] = await db.select({ revision: table.revision }).from(table).where(canvasId(row.id))
       if (stored?.revision !== row.revision) throw new CanvasWriteConflict('This canvas changed in another Zeko process. Restart Zeko to reload it.')
     }
     revisions.set(row.id, row.revision)
@@ -76,6 +80,9 @@ export function databasePersistence(connectionString: string) {
   }
 
   return {
+    async check() {
+      await db.select({ id: table.id }).from(table).where(owner).limit(1)
+    },
     load,
     reserved: (id: string) => revisions.has(id) || writes.has(id),
     enqueue(id: string, snapshot: Board, archivedAt: Date | null = null) {

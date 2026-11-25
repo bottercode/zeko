@@ -35,6 +35,7 @@ export function inspectLayers(html: string, frame: { w: number; h: number }, dep
     await page.setJavaScriptEnabled(false)
     await page.setRequestInterception(true)
     page.on('request', (request) => {
+      if (request.isInterceptResolutionHandled()) return
       void (request.isNavigationRequest() ? request.abort() : request.continue()).catch(() => undefined)
     })
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 5000 })
