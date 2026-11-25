@@ -18,4 +18,4 @@ COPY --from=build --chown=node:node /app/public ./public
 COPY --chown=node:node scripts/hosted-preview.mjs ./hosted-preview.mjs
 USER node
 EXPOSE 10000
-CMD ["node", "--env-file-if-exists=/etc/secrets/zeko.env", "hosted-preview.mjs"]
+CMD ["node", "--env-file-if-exists=/etc/secrets/zeko.env", "--env-file-if-exists=/etc/secrets/zeko-auth.env", "hosted-preview.mjs"]

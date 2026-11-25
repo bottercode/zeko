@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -67,15 +67,15 @@ const IDEAS = [
 ]
 const IDEA_LABELS = ['Pricing page', 'Onboarding flow', 'Settings screen', 'Empty and error states', 'Mobile checkout']
 
-export function Home() {
+export function Home({ account }: { account?: ReactNode }) {
   return (
     <ToastProvider>
-      <HomeInner />
+      <HomeInner account={account} />
     </ToastProvider>
   )
 }
 
-function HomeInner() {
+function HomeInner({ account }: { account?: ReactNode }) {
   const router = useRouter()
   const toast = useToast()
   const now = useNow()
@@ -276,6 +276,7 @@ function HomeInner() {
                 <p className="truncate text-2xs text-mist">{storage === 'postgres' ? 'Saved in PostgreSQL' : 'Saved on this computer'}</p>
               </div>
             </div>
+            {account}
           </div>
         </aside>
       ) : (

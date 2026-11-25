@@ -47,9 +47,25 @@ The import preserves canvas IDs and chat history, skips IDs already in PostgreSQ
 
 ## Hosted preview
 
-The Dockerfile runs one password-protected Zeko instance. On Render, set the health check to `/api/health` and add a secret file named `zeko.env` with `DATABASE_URL` and a strong `ZEKO_PREVIEW_PASSWORD`. If you upload a CA certificate, use its `/etc/secrets/` path in the database URL. Run the database migrations before deploying.
+The Dockerfile runs one private Zeko workspace. On Render, set the health check to `/api/health` and add a secret file named `zeko.env` with `DATABASE_URL` and a strong `ZEKO_PREVIEW_PASSWORD`. If you upload a CA certificate, use its `/etc/secrets/` path in the database URL. Run the database migrations before deploying.
 
-Sign in with username `zeko` and your preview password. MCP clients can connect if they support an HTTP Basic Authorization header. Embedded agent chat requires a local installation with an authenticated agent CLI.
+### Google sign-in
+
+Create a Web application OAuth client in Google Auth Platform. Add `https://YOUR_HOST/api/auth/callback/google` to its authorized redirect URIs. If the Google project is in Testing, add the permitted accounts to its test users.
+
+Add a Render secret file named `zeko-auth.env` and restart the service.
+
+```dotenv
+AUTH_URL=https://YOUR_HOST
+AUTH_SECRET=replace-with-a-random-secret
+AUTH_GOOGLE_ID=your-google-client-id
+AUTH_GOOGLE_SECRET=your-google-client-secret
+ZEKO_ALLOWED_GOOGLE_EMAILS=owner@example.com
+```
+
+Generate `AUTH_SECRET` with `openssl rand -base64 32`. Google sign-in requires a verified email on the allowlist. Separate multiple emails with commas. Everyone on the allowlist can access the same canvases.
+
+Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. External MCP clients use those credentials on `/api/mcp` after Google is enabled. Embedded agent chat requires a local installation with an authenticated agent CLI.
 
 ## Agent chat
 
