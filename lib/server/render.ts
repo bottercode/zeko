@@ -1,6 +1,6 @@
 import 'server-only'
 import { existsSync } from 'node:fs'
-import puppeteer, { type Browser } from 'puppeteer-core'
+import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 
 /* Draws sketches in a headless Chrome so agents can look at their work and people can export it.
    Uses the Chrome already on the machine; set ZEKO_CHROME to point somewhere else. */
@@ -35,23 +35,31 @@ async function browser(): Promise<Browser> {
   g.__zekoBrowser = puppeteer.launch({
     executablePath: chromePath(),
     headless: true,
+    pipe: true,
+    env: process.env.ZEKO_HOSTED === '1' ? { PATH: process.env.PATH, HOME: process.env.HOME } : undefined,
     args: ['--no-first-run', '--no-default-browser-check', '--disable-extensions', '--hide-scrollbars', '--mute-audio'],
   })
   return g.__zekoBrowser
 }
 
-async function withPage<T>(html: string, width: number, height: number, scale: number, fn: (page: import('puppeteer-core').Page) => Promise<T>): Promise<T> {
+export async function withSketchPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
   const b = await browser()
-  const page = await b.newPage()
+  const context = await b.createBrowserContext()
   try {
+    return await fn(await context.newPage())
+  } finally {
+    await context.close().catch(() => undefined)
+  }
+}
+
+async function withPage<T>(html: string, width: number, height: number, scale: number, fn: (page: Page) => Promise<T>): Promise<T> {
+  return withSketchPage(async (page) => {
     await page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: scale })
     // Sketches are the agent's own HTML; give fonts and images a moment, but never hang on them.
     await page.setContent(html, { waitUntil: 'load', timeout: 8000 }).catch(() => undefined)
     await page.evaluate(() => document.fonts?.ready).catch(() => undefined)
-    return await fn(page)
-  } finally {
-    await page.close().catch(() => undefined)
-  }
+    return fn(page)
+  })
 }
 
 export interface ShotOptions {

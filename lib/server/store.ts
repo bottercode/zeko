@@ -2,10 +2,12 @@ import 'server-only'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
+import { databaseUrl } from '../db/connection'
 import { AGENT_AWAY_MS, applyOp, deckFront, emptyBoard, upgradeSheetLabels, visibleFrames } from '../ops'
 import { addSamplePrototype, SAMPLE_ID, seedBoard } from '../seed'
 import { withDesignTokens } from '../tokens'
 import type { Actor, AgentPresence, Board, Op } from '../types'
+import { CanvasWriteConflict, databasePersistence } from './database'
 
 type Listener = (board: Board) => void
 type SeenAgent = Pick<AgentPresence, 'name' | 'lastSeen' | 'connectedAt' | 'mcpConnectedAt' | 'companion'> & { canvas: string }
@@ -23,6 +25,8 @@ interface StoreState {
   companions?: Map<string, { connectedAt: number; clients: number }>
   /** the canvas someone opened last; agents that don't name a canvas work here */
   lastOpened?: string
+  database?: ReturnType<typeof databasePersistence>
+  ready?: Promise<void>
 }
 
 const DATA_DIR = join(process.cwd(), '.zeko')
@@ -71,10 +75,6 @@ function load(): StoreState {
       }
     }
   }
-  let lastOpened: string | undefined
-  try {
-    lastOpened = (JSON.parse(readFileSync(META_FILE, 'utf8')) as { lastOpened?: string }).lastOpened
-  } catch {}
   if (entries.size === 0) {
     // First run, or a board saved before canvases: it becomes the first canvas.
     let first: Board
@@ -86,15 +86,44 @@ function load(): StoreState {
     entries.set(SAMPLE_ID, { board: stamp(recoverRuns(first)), listeners: new Set() })
     writeAtomic(join(BOARDS_DIR, `${SAMPLE_ID}.json`), JSON.stringify(entries.get(SAMPLE_ID)!.board))
   }
-  return { entries, lastOpened }
+  return { entries, lastOpened: readLastOpened() }
+}
+
+function readLastOpened() {
+  try {
+    return (JSON.parse(readFileSync(META_FILE, 'utf8')) as { lastOpened?: string }).lastOpened
+  } catch { return undefined }
 }
 
 /* One store per process. Route modules can be loaded more than once in
    development, so the state lives on globalThis rather than in the module. */
 const g = globalThis as typeof globalThis & { __zekoCanvases?: StoreState }
-const state: StoreState = (g.__zekoCanvases ??= load())
+const connectionString = databaseUrl()
+export const storageMode = connectionString ? 'postgres' : 'local'
+const state: StoreState = (g.__zekoCanvases ??= connectionString ? { entries: new Map(), lastOpened: readLastOpened() } : load())
 const agentListeners = (state.agentListeners ??= new Set())
 const companions = (state.companions ??= new Map())
+
+export async function prepareStore() {
+  if (!connectionString) return
+  const persistence = (state.database ??= databasePersistence(connectionString))
+  state.ready ??= persistence.load().then((rows) => {
+    state.entries = new Map(rows.map(({ id, snapshot }) => [id, { board: stamp(recoverRuns(snapshot)), listeners: new Set() }]))
+  }).catch(() => {
+    state.ready = undefined
+    throw new Error('Could not load canvases from PostgreSQL. Check DATABASE_URL and run npm run db:migrate.')
+  })
+  await state.ready
+}
+
+export async function flushCanvas(id: string) {
+  try {
+    await state.database?.flush(id)
+  } catch (error) {
+    if (error instanceof CanvasWriteConflict) throw error
+    throw new Error('Could not confirm the canvas save in PostgreSQL. Zeko will retry.')
+  }
+}
 
 function withCompanions(board: Board): Board {
   if (!companions.size) return board
@@ -146,6 +175,10 @@ function publishCompanions() {
 function persist(id: string) {
   const entry = state.entries.get(id)
   if (!entry) return
+  if (state.database) {
+    state.database.enqueue(id, entry.board)
+    return
+  }
   clearTimeout(entry.saveTimer)
   entry.saveTimer = setTimeout(() => writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(entry.board)), 250)
 }
@@ -162,7 +195,7 @@ function publish(id: string) {
 export function resolveId(id?: string | null): string {
   if (id && state.entries.has(id)) return id
   if (state.lastOpened && state.entries.has(state.lastOpened)) return state.lastOpened
-  return listBoards()[0]?.id ?? createBoard({ sample: true })
+  return listBoards()[0]?.id ?? openSampleBoard()
 }
 
 export function hasBoard(id: string) {
@@ -247,23 +280,28 @@ export function replaceBoard(id: string, next: Board): Board {
 }
 
 export function createBoard({ name, sample, from }: { name?: string; sample?: boolean; from?: Board } = {}): string {
-  let id = sample && !state.entries.has(SAMPLE_ID) ? SAMPLE_ID : nanoid(10)
-  while (!validId(id) || state.entries.has(id)) id = nanoid(10)
+  const taken = (id: string) => state.entries.has(id) || state.database?.reserved(id)
+  let id = sample && !taken(SAMPLE_ID) ? SAMPLE_ID : nanoid(10)
+  while (!validId(id) || taken(id)) id = nanoid(10)
   const now = Date.now()
   const base = from ? recoverRuns({ ...structuredClone(from), agents: {} }) : sample ? seedBoard() : emptyBoard()
   const board = upgradeSheetLabels({ ...base, name: name?.trim() || base.name || 'Untitled canvas', createdAt: now, updatedAt: now, version: 0 })
   state.entries.set(id, { board, listeners: new Set() })
-  writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(board))
+  if (state.database) state.database.enqueue(id, board)
+  else writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(board))
   return id
 }
 
-/** Moves the canvas to .zeko/trash rather than erasing it. */
+/** Archives the canvas while preserving the snapshot in its storage backend. */
 export function deleteBoard(id: string): boolean {
   const entry = state.entries.get(id)
   if (!entry) return false
   clearTimeout(entry.saveTimer)
-  writeAtomic(join(TRASH_DIR, `${id}-${Date.now()}.json`), JSON.stringify(entry.board))
-  rmSync(join(BOARDS_DIR, `${id}.json`), { force: true })
+  if (state.database) state.database.enqueue(id, entry.board, new Date())
+  else {
+    writeAtomic(join(TRASH_DIR, `${id}-${Date.now()}.json`), JSON.stringify(entry.board))
+    rmSync(join(BOARDS_DIR, `${id}.json`), { force: true })
+  }
   state.entries.delete(id)
   if (state.lastOpened === id) state.lastOpened = undefined
   publishAgents()

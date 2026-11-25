@@ -7,7 +7,7 @@ import { withDesignTokens } from '@/lib/tokens'
 /** A sketch as a PNG: ?scale=1|2|3, &full=1 for the whole page rather than the frame's size. */
 export async function GET(req: NextRequest, ctx: RouteContext<'/api/frames/[id]/png'>) {
   const { id } = await ctx.params
-  const canvas = canvasOf(req)
+  const canvas = await canvasOf(req)
   if (!canvas) return noCanvas()
   const board = getBoard(canvas)
   const frame = board.frames.find((f) => f.id === id)

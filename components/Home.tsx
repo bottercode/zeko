@@ -80,6 +80,7 @@ function HomeInner() {
   const toast = useToast()
   const now = useNow()
   const [canvases, setCanvases] = useState<Canvas[] | null>(null)
+  const [storage, setStorage] = useState<'local' | 'postgres'>('local')
   const [presence, setPresence] = useState<SeenAgent[]>([])
   const [offline, setOffline] = useState(false)
   const [sidebar, setSidebar] = useState(true)
@@ -97,8 +98,10 @@ function HomeInner() {
   const load = async () => {
     try {
       const res = await fetch('/api/boards', { cache: 'no-store' })
-      const data = (await res.json()) as { canvases: Canvas[] }
+      if (!res.ok) throw new Error('Could not load canvases')
+      const data = (await res.json()) as { canvases: Canvas[]; storage?: 'local' | 'postgres' }
       setCanvases(data.canvases)
+      setStorage(data.storage ?? 'local')
       setOffline(false)
     } catch {
       setOffline(true)
@@ -177,11 +180,15 @@ function HomeInner() {
           onSelect: () =>
             setConfirm({
               title: `Delete ${c.name}?`,
-              body: 'It leaves this list. A copy stays in the .zeko/trash folder if you need it back.',
+              body: 'It leaves this list. An archived copy is kept.',
               confirm: 'Delete canvas',
               onConfirm: async () => {
+                const response = await fetch(`/api/boards/${c.id}`, { method: 'DELETE' }).catch(() => null)
+                if (!response?.ok) {
+                  toast('Couldn’t confirm that the canvas was archived.')
+                  return
+                }
                 setCanvases((list) => list?.filter((x) => x.id !== c.id) ?? null)
-                await fetch(`/api/boards/${c.id}`, { method: 'DELETE' })
                 toast(`Deleted ${c.name}`)
                 void load()
               },
@@ -266,7 +273,7 @@ function HomeInner() {
               <span className="grid size-7 place-items-center rounded-full bg-[#5b6cff] text-xs font-semibold text-white">Y</span>
               <div className="min-w-0">
                 <p className="text-sm">You</p>
-                <p className="truncate text-2xs text-mist">Saved on this computer</p>
+                <p className="truncate text-2xs text-mist">{storage === 'postgres' ? 'Saved in PostgreSQL' : 'Saved on this computer'}</p>
               </div>
             </div>
           </div>

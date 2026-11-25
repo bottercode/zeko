@@ -1,6 +1,6 @@
 import { connection } from 'next/server'
 import { nanoid } from 'nanoid'
-import { createBoard, dispatch, knownAgents, listBoards, openSampleBoard } from '@/lib/server/store'
+import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode } from '@/lib/server/store'
 import type { Board } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
 import { readMemoryRules, readSketchComponents } from '@/lib/ops'
@@ -11,7 +11,8 @@ import { readAcpSelection } from '@/lib/acp'
 /** Every canvas, most recently edited first, and the agents seen on any of them. */
 export async function GET() {
   await connection()
-  return Response.json({ canvases: listBoards(), agents: knownAgents() })
+  await prepareStore()
+  return Response.json({ canvases: listBoards(), agents: knownAgents(), storage: storageMode })
 }
 
 interface CreateBody {
@@ -29,8 +30,13 @@ const isList = (v: unknown) => Array.isArray(v)
 
 /** Makes a canvas: empty, the sample, from an exported file, or from a request for agents. */
 export async function POST(request: Request) {
+  await prepareStore()
   const body = ((await request.json().catch(() => null)) ?? {}) as CreateBody
-  if (body.sample === 'open') return Response.json({ id: openSampleBoard() })
+  if (body.sample === 'open') {
+    const id = openSampleBoard()
+    await flushCanvas(id)
+    return Response.json({ id })
+  }
   let from: Board | undefined
   if (body.board) {
     const b = body.board
@@ -41,12 +47,13 @@ export async function POST(request: Request) {
   const prompt = body.prompt?.trim().slice(0, 4000)
   const name = body.name ?? (prompt ? nameFrom(prompt) : undefined)
   const id = createBoard({ name, sample: body.sample, from })
-  if (prompt) {
-    const taskId = nanoid(10)
+  const taskId = prompt ? nanoid(10) : undefined
+  if (prompt && taskId) {
     dispatch(id, { type: 'task.add', id: taskId, text: prompt, frameIds: [], assignee: body.assignee?.slice(0, 40) || undefined, acp: readAcpSelection(body.acp) }, { kind: 'human', name: 'You' })
-    const origin = localAgentOrigin(request)
-    if (origin) startAgentRequest(id, taskId, origin)
   }
+  await flushCanvas(id)
+  const origin = taskId && localAgentOrigin(request)
+  if (taskId && origin) startAgentRequest(id, taskId, origin)
   return Response.json({ id }, { status: 201 })
 }
 

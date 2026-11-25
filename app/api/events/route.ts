@@ -6,7 +6,7 @@ import { eventStream } from '@/lib/server/events'
 /** Server-sent events: the whole board after every change. */
 export async function GET(request: Request) {
   await connection()
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return noCanvas()
   // Watching a canvas makes it the one agents work on by default.
   markOpened(id)

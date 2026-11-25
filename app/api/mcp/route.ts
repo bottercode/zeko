@@ -9,6 +9,7 @@ import { canvasOf } from '@/lib/server/canvas'
 import type { Actor, Board, Frame, Task } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { inspect, screenshot } from '@/lib/server/render'
+import { editLayers, inspectLayers, layerRevision } from '@/lib/server/layers'
 
 const INSTRUCTIONS = `Zeko is a light table for a product's screens. Each frame is a sketch: a whole HTML
 document you write, labelled with the route and state it stands for.
@@ -25,6 +26,7 @@ How to work:
    an element attachment, use its frameId, path, tag, name and text to find the element in the sketch.
    The path is made of zero-based child indexes from body, excluding script, style, meta, link, noscript,
    template, title and head elements. Confirm the tag and label before editing, since the sketch may have changed.
+   For targeted changes, use get_layers to find the layer paths and revision, then edit_layers to save text, CSS, or structural changes in one batch.
 3. For design work, call set_status as soon as you know what you are making. Publish the first real section
    early with create_sketch and streaming: true. Use a small, valid HTML document with inline CSS and put
    <!-- zeko:stream --> where the next section belongs. Call append_to_sketch with before set to that marker
@@ -42,6 +44,7 @@ How to work:
 /* Each request works on one canvas: the one its URL names with ?board=ID, or the one the person opened last. */
 interface CanvasScope {
   id: string
+  dirty?: boolean
   presenceRequestId?: string | number
   run?: { taskId: string; runId: string }
 }
@@ -49,7 +52,11 @@ interface CanvasScope {
 const canvas = new AsyncLocalStorage<CanvasScope>()
 const here = () => canvas.getStore()?.id ?? store.resolveId()
 const getBoard = () => store.getBoard(here())
-const dispatch = (op: Parameters<typeof store.dispatch>[1], actor: Actor) => store.dispatch(here(), op, actor)
+const dispatch = (op: Parameters<typeof store.dispatch>[1], actor: Actor) => {
+  const scope = canvas.getStore()
+  if (scope && op.type !== 'agent.status' && op.type !== 'agent.connect') scope.dirty = true
+  return store.dispatch(here(), op, actor)
+}
 
 function canHandleTask(task: Task) {
   const run = canvas.getStore()?.run
@@ -71,6 +78,19 @@ function agentFrom(req: Request | undefined): Actor {
 }
 
 type Ctx = { http?: { req?: Request } }
+
+const layerPath = z.string().max(180).regex(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*$/)
+const layerHtml = z.string().trim().min(1).max(100_000)
+const layerPlacement = { parent_path: layerPath.optional(), before_path: layerPath.optional() }
+const layerStyles = z.record(z.string().max(80).regex(/^(?:--[a-zA-Z0-9_-]+|-?[a-z][a-z0-9-]*)$/), z.string().max(2400).nullable())
+  .refine((styles) => Object.keys(styles).length <= 40, 'Use up to 40 CSS properties per layer.')
+const layerEdits = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('update'), path: layerPath, text: z.string().max(8000).optional(), styles: layerStyles.optional() }),
+  z.object({ op: z.literal('insert'), html: layerHtml, ...layerPlacement }),
+  z.object({ op: z.literal('move'), path: layerPath, ...layerPlacement }),
+  z.object({ op: z.literal('replace'), path: layerPath, html: layerHtml }),
+  z.object({ op: z.literal('remove'), path: layerPath }),
+])
 
 function text(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] }
@@ -230,6 +250,58 @@ const handler = createMcpHandler(
         }
         touch(actor, args.streaming ? `Drawing ${args.name}` : `Sketched ${args.name}`, id, args.streaming)
         return text({ frame_id: id, deck: board.frames.find((f) => f.id === id)?.deckId ?? null })
+      },
+    )
+
+    server.registerTool(
+      'get_layers',
+      {
+        title: 'Get sketch layers',
+        description: 'Read the authored layer tree of a sketch at its current size. Pass a path to inspect just that layer and its computed CSS. Returns a revision for edit_layers. Paths are the same zero-based child indexes used by the Design panel. Elements created by page scripts are outside the authored tree.',
+        inputSchema: z.object({ frame_id: z.string(), path: layerPath.optional(), depth: z.number().int().min(1).max(8).default(3) }),
+      },
+      async ({ frame_id, path, depth }: { frame_id: string; path?: string; depth: number }) => {
+        const board = getBoard()
+        const frame = board.frames.find((f) => f.id === frame_id)
+        if (!frame || frame.kind !== 'sketch' || frame.html === undefined) return fail(`No sketch ${frame_id}.`)
+        const revision = layerRevision(frame.html)
+        try {
+          const result = await inspectLayers(withDesignTokens(frame.html, board.design), frame, depth, path)
+          return text({ frame_id, revision, ...result })
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'Could not read the sketch’s layers.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'edit_layers',
+      {
+        title: 'Edit sketch layers',
+        description: 'Batch changes to individual layers of a sketch as one saved version. Update text or kebab-case CSS properties (null clears an inline property), insert or replace HTML, move, or remove a layer. Use the revision and paths from get_layers. Every path refers to the original tree for that revision. For insert and move, omit parent_path to use the body and omit before_path to append. Refresh the layer tree after a structural edit.',
+        inputSchema: z.object({ frame_id: z.string(), revision: z.string().regex(/^[a-f0-9]{64}$/), edits: z.array(layerEdits).min(1).max(60) }),
+      },
+      async ({ frame_id, revision, edits }: { frame_id: string; revision: string; edits: z.infer<typeof layerEdits>[] }, ctx: Ctx) => {
+        const frame = getBoard().frames.find((f) => f.id === frame_id)
+        if (!frame || frame.kind !== 'sketch' || frame.html === undefined) return fail(`No sketch ${frame_id}.`)
+        const source = frame.html
+        const stale = 'The sketch changed. Call get_layers for the current revision and confirm the paths before retrying.'
+        if (layerRevision(source) !== revision) return fail(stale)
+        try {
+          const result = await editLayers(source, edits)
+          const current = getBoard().frames.find((f) => f.id === frame_id)
+          if (!current || current.kind !== 'sketch' || current.html !== source) return fail(stale)
+          if (result.html.length > 2_000_000) return fail('That sketch is over 2 MB. Split the design across frames.')
+          const changed = result.html !== source
+          if (changed) {
+            const actor = agentFrom(ctx.http?.req)
+            dispatch({ type: 'frame.update', id: frame_id, patch: { html: result.html } }, actor)
+            touch(actor, `Edited layers in ${current.name}`, frame_id, false)
+          }
+          return text({ frame_id, revision: changed ? layerRevision(result.html) : revision, paths: result.paths, changed })
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'Could not edit the sketch’s layers.')
+        }
       },
     )
 
@@ -588,7 +660,7 @@ async function acceptedRequest(response: Response, id: string | number) {
 }
 
 async function route(request: Request) {
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return Response.json({ error: 'No such canvas. Leave out ?board= to work on the canvas the person has open.' }, { status: 404 })
   const scope: CanvasScope = { id }
   const params = new URL(request.url).searchParams
@@ -602,6 +674,7 @@ async function route(request: Request) {
     scope.run = { taskId, runId }
   }
   const response = await canvas.run(scope, () => handler(request))
+  if (scope.dirty) await store.flushCanvas(id)
   if (scope.presenceRequestId !== undefined && await acceptedRequest(response, scope.presenceRequestId) && store.hasBoard(id)) {
     store.dispatch(id, { type: 'agent.connect' }, agentFrom(request))
   }

@@ -1,5 +1,5 @@
 import { connection } from 'next/server'
-import { dispatch, getBoard, replaceBoard, resetBoard } from '@/lib/server/store'
+import { dispatch, flushCanvas, getBoard, replaceBoard, resetBoard } from '@/lib/server/store'
 import { canvasOf, noCanvas } from '@/lib/server/canvas'
 import type { Board, Op } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
@@ -43,13 +43,13 @@ const HUMAN_OPS = new Set<Op['type']>([
 
 export async function GET(request: Request) {
   await connection()
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return noCanvas()
   return Response.json({ ...getBoard(id), id })
 }
 
 export async function POST(request: Request) {
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return noCanvas()
   const op = (await request.json().catch(() => null)) as Op | { type: 'task.start'; id: string } | { type: 'task.stop'; id: string } | null
   const origin = localAgentOrigin(request)
@@ -58,14 +58,18 @@ export async function POST(request: Request) {
     if (typeof op.id !== 'string' || !stopAgentRequest(id, op.id)) {
       return Response.json({ error: 'This reply has already stopped.' }, { status: 409 })
     }
-    return Response.json({ version: getBoard(id).version })
+    const { version } = getBoard(id)
+    await flushCanvas(id)
+    return Response.json({ version })
   }
   if (op?.type === 'task.start') {
     if (!origin) return Response.json({ error: 'Open Zeko on localhost to start the agent.' }, { status: 403 })
     if (typeof op.id !== 'string' || !startAgentRequest(id, op.id, origin)) {
       return Response.json({ error: 'This request is unavailable to start.' }, { status: 409 })
     }
-    return Response.json({ version: getBoard(id).version })
+    const { version } = getBoard(id)
+    await flushCanvas(id)
+    return Response.json({ version })
   }
   const allowed = (o: Op | null): boolean =>
     !!o && typeof o === 'object' && HUMAN_OPS.has(o.type) && (o.type !== 'batch' || (Array.isArray(o.ops) && o.ops.every((x) => x.type !== 'batch' && allowed(x))))
@@ -74,21 +78,23 @@ export async function POST(request: Request) {
   }
   const operations = op.type === 'batch' ? op.ops : [op]
   const existing = new Set(getBoard(id).tasks.map((task) => task.id))
-  dispatch(id, op, { kind: 'human', name: 'You' })
+  const { version } = dispatch(id, op, { kind: 'human', name: 'You' })
+  await flushCanvas(id)
   if (origin) for (const item of operations) {
     if (item.type === 'task.add' && !existing.has(item.id)) {
       existing.add(item.id)
       startAgentRequest(id, item.id, origin)
     }
   }
-  return Response.json({ version: getBoard(id).version })
+  return Response.json({ version })
 }
 
 /** Puts the sample board back. */
 export async function DELETE(request: Request) {
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return noCanvas()
   const board = resetBoard(id)
+  await flushCanvas(id)
   return Response.json({ version: board.version })
 }
 
@@ -97,7 +103,7 @@ const isMap = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** Replaces the board with an exported one. Checks the shape, not every field. */
 export async function PUT(request: Request) {
-  const id = canvasOf(request)
+  const id = await canvasOf(request)
   if (!id) return noCanvas()
   const raw = (await request.json().catch(() => null)) as Partial<Board> | null
   const ok =
@@ -128,5 +134,6 @@ export async function PUT(request: Request) {
     activity: isList(raw!.activity) ? raw!.activity! : [],
     version: 0,
   })
+  await flushCanvas(id)
   return Response.json({ version: board.version })
 }

@@ -9,7 +9,7 @@ import { ACP_AGENTS, acpAgent, type AcpAgentId, type AcpCapabilities, type AcpOp
 
 const CANVAS_TOOLS = [
   'get_board', 'get_frame', 'get_guidelines', 'get_skill', 'claim_task', 'complete_task', 'set_status',
-  'create_sketch', 'edit_sketch', 'append_to_sketch', 'fit_frame_to_content', 'inspect_frame', 'screenshot_frame',
+  'create_sketch', 'get_layers', 'edit_layers', 'edit_sketch', 'append_to_sketch', 'fit_frame_to_content', 'inspect_frame', 'screenshot_frame',
 ]
 
 function executable(name: string) {
@@ -28,7 +28,7 @@ function agentCommand(agent: typeof ACP_AGENTS[number]) {
 }
 
 export function listAcpAgents() {
-  return ACP_AGENTS.map((agent) => ({ id: agent.id, name: agent.name, available: !!agentCommand(agent) }))
+  return ACP_AGENTS.map((agent) => ({ id: agent.id, name: agent.name, available: process.env.ZEKO_HOSTED !== '1' && !!agentCommand(agent) }))
 }
 
 function choicesFor(option: SessionConfigOption, id: AcpAgentId): AcpOption | undefined {

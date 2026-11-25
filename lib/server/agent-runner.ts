@@ -14,6 +14,7 @@ const runKey = (boardId: string, taskId: string) => `${boardId}:${taskId}`
 
 /** Browser actions that launch a local process come from Zeko's loopback origin. */
 export function localAgentOrigin(request: Request): string | undefined {
+  if (process.env.ZEKO_HOSTED === '1') return undefined
   const origin = request.headers.get('origin')
   if (!origin) return undefined
   try {
@@ -74,6 +75,7 @@ async function runAgent(
     `You are working on Zeko canvas ${JSON.stringify(boardId)}, request ${JSON.stringify(taskId)}.`,
     'Answer questions directly. For canvas work, read get_board and the relevant frame or guidelines, use the Zeko tools, then call complete_task with the actual result frame IDs and finish with a brief reply.',
     'If the request names a canvas skill or clearly matches its description in get_board, read it with get_skill and use its instructions.',
+    'For specific text, style, and layout edits, use get_layers and edit_layers. Batch related layer changes with the revision from get_layers and verify the result on the canvas.',
     'For a design, call set_status when you start. Publish the first meaningful section with create_sketch (streaming: true and a <!-- zeko:stream --> marker). Send each next section with append_to_sketch, before that marker, and set done: true on the last one. Put the first version on the canvas before sourcing images or polishing. Do not use shell commands or edit workspace files.',
     task.frameIds.length ? `Attached frame IDs: ${JSON.stringify(task.frameIds)}.` : '',
     task.element ? `Selected element: ${JSON.stringify(task.element)}.` : '',

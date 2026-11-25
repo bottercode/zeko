@@ -5,7 +5,7 @@ import { withDesignTokens } from '@/lib/tokens'
 
 export async function GET(req: Request, ctx: RouteContext<'/api/frames/[id]/pdf'>) {
   const { id } = await ctx.params
-  const canvas = canvasOf(req)
+  const canvas = await canvasOf(req)
   if (!canvas) return noCanvas()
   const board = getBoard(canvas)
   const frame = board.frames.find((f) => f.id === id)

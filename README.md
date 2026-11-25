@@ -29,9 +29,27 @@ npm ci
 npm run dev
 ```
 
-Open [Zeko on localhost](http://localhost:4747). Canvases, requests, and settings are stored locally in `.zeko/`.
+Open [Zeko on localhost](http://localhost:4747). By default, canvases, requests, and settings are stored locally in `.zeko/`.
 
 Open [the landing-page example](examples/landing-page.html) in a browser to try the sample **Draft → Compare → Keep** workflow.
+
+## PostgreSQL storage
+
+Set `DATABASE_URL` in `.env.local` to save canvases in PostgreSQL with Drizzle. If your provider uses a private certificate authority, include `sslmode=verify-full&sslrootcert=/path/to/ca.crt` in the URL.
+
+```bash
+npm run db:migrate
+npm run db:import-local  # Copy existing .zeko canvases if you want to move them to PostgreSQL
+npm run dev
+```
+
+The import preserves canvas IDs and chat history, skips IDs already in PostgreSQL, and keeps the original files. Zeko stores the full canvas snapshot in `zeko.canvases`, including frames, history, and Memory. The app serves live canvas updates from its running process. Changes from a second Zeko process are checked against the saved revision.
+
+## Hosted preview
+
+The Dockerfile runs one password-protected Zeko instance. On Render, set the health check to `/api/health` and add a secret file named `zeko.env` with `DATABASE_URL` and a strong `ZEKO_PREVIEW_PASSWORD`. If you upload a CA certificate, use its `/etc/secrets/` path in the database URL. Run the database migrations before deploying.
+
+Sign in with username `zeko` and your preview password. MCP clients can connect if they support an HTTP Basic Authorization header. Embedded agent chat requires a local installation with an authenticated agent CLI.
 
 ## Agent chat
 
@@ -53,6 +71,7 @@ The app's start scripts listen on loopback. Other Streamable HTTP clients can us
 Tools:
 
 - Reading: `get_board`, `get_frame`, `get_guidelines`
+- Layer editing: `get_layers` reads the layer tree and computed styles. `edit_layers` saves a batch of text, CSS, and layout edits as one version.
 - Designing: `create_sketch` (with `variant_of` to join a deck), `edit_sketch`, `append_to_sketch` for long pages,
   `fit_frame_to_content`, `delete_frame` (only frames the agent made)
 - Checking its own work: `screenshot_frame` returns the rendered sketch as an image, `inspect_frame` returns

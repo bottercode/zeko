@@ -69,6 +69,8 @@ export function useBoard(boardId: string) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(op),
+      }).then((response) => {
+        if (!response.ok) setConnection('offline')
       }).catch(() => setConnection('offline'))
     },
     [show, q],

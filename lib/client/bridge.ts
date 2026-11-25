@@ -5,8 +5,9 @@
  */
 
 import { TOKEN_STYLE_ID } from '../tokens'
+import { LAYER_IGNORED_IDS, LAYER_IGNORED_TAGS } from '../sketch-layers'
 
-export const BRIDGE_ID = '__zeko_bridge'
+export const BRIDGE_ID = LAYER_IGNORED_IDS[0]!
 export const STREAM_MARKER = '<!-- zeko:stream -->'
 
 export interface LayerNode {
@@ -102,13 +103,13 @@ export type FromFrame =
 
 /* The script below is plain browser JavaScript, kept dependency free. */
 const SCRIPT = String.raw`(() => {
-  const BRIDGE = '${BRIDGE_ID}', OVERLAY = '__zeko_overlay', TOKENS = '${TOKEN_STYLE_ID}'
-  const SKIP = new Set(['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT', 'TEMPLATE', 'TITLE', 'HEAD'])
+  const [BRIDGE, OVERLAY] = ${JSON.stringify(LAYER_IGNORED_IDS)}, TOKENS = '${TOKEN_STYLE_ID}'
+  const SKIP = new Set(${JSON.stringify(LAYER_IGNORED_TAGS)})
   let editing = false, selected = null, hovered = null, textEditing = null
   let streamedSections = ''
   let pointerPoint = null, pointerZoom = 1, pendingDraw = 0
   const post = (m) => parent.postMessage(Object.assign({ __zeko: 1 }, m), '*')
-  const kids = (el) => [...el.children].filter((c) => !SKIP.has(c.tagName) && c.id !== BRIDGE && c.id !== OVERLAY)
+  const kids = (el) => [...el.children].filter((c) => !SKIP.has(c.localName) && c.id !== BRIDGE && c.id !== OVERLAY)
   const pathOf = (el) => {
     const p = []
     while (el && el !== document.body) {

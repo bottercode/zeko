@@ -1,0 +1,13 @@
+.git
+.next
+.zeko
+.claude
+.railway
+.render
+.vercel
+.env*
+*.pem
+node_modules
+coverage
+*.tsbuildinfo
+next-env.d.ts
