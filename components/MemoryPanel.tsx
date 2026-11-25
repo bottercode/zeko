@@ -6,11 +6,11 @@ import { ago, newId } from '@/lib/client/useBoard'
 import { parseWebsiteUrl, RULE_TEXT_LIMIT } from '@/lib/ops'
 import { withDesignTokens } from '@/lib/tokens'
 import type { Frame, MemoryRule } from '@/lib/types'
-import { Button, IconButton } from './kit'
+import { IconButton } from './kit'
 import { SkillsPanel } from './SkillsPanel'
-import { Button as ActionButton } from './ui/button'
+import { Button } from './ui/button'
 import { useStudio } from './studio-context'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
+import { Field, FieldGroup, FieldLabel } from './ui/field'
 import { Input } from './ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Textarea } from './ui/textarea'
@@ -49,19 +49,20 @@ export function MemoryPanel() {
         </TabsList>
       </div>
       <TabsContent value="context">
-        <MemoryContext references={references} rules={rules} onEdit={setEditor} onRemove={remove} />
-        {editor && <RuleEditor rule={editor} onSave={save} onClose={() => setEditor(null)} />}
+        <MemoryContext references={references} rules={rules} editor={editor} onEdit={setEditor} onRemove={remove} onSave={save} />
       </TabsContent>
       <TabsContent value="skills"><SkillsPanel /></TabsContent>
     </Tabs>
   )
 }
 
-function MemoryContext({ references, rules, onEdit, onRemove }: {
+function MemoryContext({ references, rules, editor, onEdit, onRemove, onSave }: {
   references: Frame[]
   rules: RuleDraft[]
-  onEdit: (rule: RuleDraft) => void
+  editor: RuleDraft | null
+  onEdit: (rule: RuleDraft | null) => void
   onRemove: (rule: RuleDraft) => void
+  onSave: (rule: RuleDraft) => void
 }) {
   const { now, showResult } = useStudio()
   return (
@@ -69,20 +70,19 @@ function MemoryContext({ references, rules, onEdit, onRemove }: {
       <section className="px-3 py-3.5" aria-labelledby="memory-references">
         <h2 id="memory-references" className="mb-2.5 text-xs font-semibold text-slate">References</h2>
         {references.length ? (
-          <ul className="grid gap-3">
+          <ul className="flex flex-col gap-1">
             {references.map((frame) => (
-              <li key={frame.id} className="relative min-w-0 rounded-lg hover:bg-wash">
-                {frame.kind !== 'website' && <ReferencePreview frame={frame} />}
-                <ActionButton variant="ghost" type="button" onClick={() => showResult([frame])} aria-label={`Open reference ${frame.name}`} className="editor-control flex h-auto w-full min-w-0 flex-col items-stretch gap-0.5 px-1.5 pt-1.5 pb-1 text-left before:absolute before:inset-0 before:rounded-lg">
-                  <span className="flex min-w-0 items-center justify-between gap-2 font-medium">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      {frame.kind === 'website' && <Globe size={13} className="shrink-0 text-slate" aria-hidden />}
-                      <span className="truncate">{frame.name}</span>
-                    </span>
-                    <ArrowUpRight size={13} className="shrink-0 text-slate" aria-hidden />
+              <li key={frame.id} className="min-w-0">
+                <Button variant="ghost" type="button" onClick={() => showResult([frame])} aria-label={`Open reference ${frame.name}`} className="h-auto w-full min-w-0 justify-start gap-2 px-1.5 py-1.5 text-left">
+                  {frame.kind === 'website' ? (
+                    <span className="grid h-9 w-12 shrink-0 place-items-center rounded-md border border-border bg-muted"><Globe aria-hidden className="text-muted-foreground" /></span>
+                  ) : <ReferencePreview frame={frame} />}
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate">{frame.name}</span>
+                    <span className="truncate text-xs font-normal text-muted-foreground">{frame.kind === 'website' ? parseWebsiteUrl(frame.url)?.hostname : now > 0 ? `Edited ${ago(frame.updatedAt, now)}` : 'Sketch'}</span>
                   </span>
-                  <span className="truncate text-xs text-slate">{frame.kind === 'website' ? parseWebsiteUrl(frame.url)?.href : <>{frame.createdBy.name}{now > 0 && ` · edited ${ago(frame.updatedAt, now)}`}</>}</span>
-                </ActionButton>
+                  <ArrowUpRight aria-hidden className="text-muted-foreground" />
+                </Button>
               </li>
             ))}
           </ul>
@@ -91,16 +91,16 @@ function MemoryContext({ references, rules, onEdit, onRemove }: {
       <section className="editor-divider border-t px-3 py-3.5" aria-labelledby="memory-rules">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h2 id="memory-rules" className="text-xs font-semibold text-slate">Rules</h2>
-          <Button size="sm" aria-label="New rule" onClick={() => onEdit({ title: '', text: '' })}><Plus aria-hidden data-icon="inline-start" /> New</Button>
+          {!editor && <Button size="sm" variant="secondary" onClick={() => onEdit({ title: '', text: '' })}><Plus aria-hidden data-icon="inline-start" /> Add rule</Button>}
         </div>
-        {rules.length ? (
+        {editor ? <RuleEditor rule={editor} onSave={onSave} onClose={() => onEdit(null)} /> : rules.length ? (
           <ul className="divide-y divide-hair">
             {rules.map((rule) => (
               <li key={rule.legacy ? 'guidelines' : `rule:${rule.id}`} className="flex min-w-0 items-center gap-1 py-0.5">
-                <ActionButton variant="ghost" type="button" onClick={() => onEdit(rule)} className="editor-control h-auto min-w-0 flex-1 flex-col items-start gap-0 px-2 py-1.5 text-left [&>span]:max-w-full" aria-label={`Edit ${rule.title}`}>
+                <Button variant="ghost" type="button" onClick={() => onEdit(rule)} className="h-auto min-w-0 flex-1 flex-col items-start gap-0 px-2 py-1.5 text-left [&>span]:max-w-full" aria-label={`Edit ${rule.title}`}>
                   <span className="block truncate font-medium">{rule.title}</span>
                   <span className="block truncate text-xs text-slate">{rule.text}</span>
-                </ActionButton>
+                </Button>
                 <IconButton label={`Remove ${rule.title}`} onClick={() => onRemove(rule)} className="size-7 shrink-0"><Trash2 size={14} /></IconButton>
               </li>
             ))}
@@ -128,7 +128,7 @@ function ReferencePreview({ frame }: { frame: Frame }) {
   }, [html, frame.w, frame.h])
 
   return (
-    <span ref={ref} aria-hidden className="relative grid h-28 place-items-center overflow-hidden rounded-lg border border-hair bg-table">
+    <span ref={ref} aria-hidden className="relative grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-muted">
       {html ? scale > 0 && (
         <iframe
           title="Reference preview"
@@ -150,36 +150,30 @@ function RuleEditor({ rule, onSave, onClose }: { rule: RuleDraft; onSave: (rule:
   const body = text.trim()
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-auto p-5 sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{rule.legacy || rule.id ? 'Edit rule' : 'New rule'}</DialogTitle>
-          <DialogDescription>Agents read this when they work on this canvas.</DialogDescription>
-        </DialogHeader>
-        <form className="grid gap-3" onSubmit={(event) => {
-          event.preventDefault()
-          if (name && body) onSave({ ...rule, title: name, text: body })
-        }} onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-            event.preventDefault()
-            event.currentTarget.requestSubmit()
-          }
-        }}>
-          <label className="grid gap-1.5 text-xs font-medium">
-            Rule name
-            <Input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} readOnly={rule.legacy} placeholder="Palette or voice" required />
-          </label>
-          <label className="grid gap-1.5 text-xs font-medium">
-            Instructions
-            <Textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={RULE_TEXT_LIMIT} placeholder="Describe what agents should follow." className="min-h-48 resize-y text-sm" required />
-          </label>
-          <div className="flex items-center justify-end gap-2">
-            <span className="mr-auto text-xs tabular-nums text-slate">{text.length.toLocaleString('en-US')} / {RULE_TEXT_LIMIT.toLocaleString('en-US')}</span>
-            <Button type="button" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="primary" disabled={!name || !body}>Save</Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form aria-label={rule.legacy || rule.id ? 'Edit rule' : 'New rule'} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3" onSubmit={(event) => {
+      event.preventDefault()
+      if (name && body) onSave({ ...rule, title: name, text: body })
+    }} onKeyDown={(event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        event.currentTarget.requestSubmit()
+      }
+    }}>
+      <FieldGroup className="gap-3">
+        {rule.legacy ? <p className="text-sm font-medium">Canvas guidelines</p> : <Field className="gap-1.5">
+          <FieldLabel htmlFor="memory-rule-name">Rule name</FieldLabel>
+          <Input id="memory-rule-name" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="e.g. Brand voice" required />
+        </Field>}
+        <Field className="gap-1.5">
+          <FieldLabel htmlFor="memory-rule-text">Instructions</FieldLabel>
+          <Textarea id="memory-rule-text" value={text} onChange={(event) => setText(event.target.value)} maxLength={RULE_TEXT_LIMIT} placeholder="What should agents follow?" className="min-h-24 max-h-60 resize-y text-sm" required />
+        </Field>
+      </FieldGroup>
+      {text.length === RULE_TEXT_LIMIT && <p role="status" className="text-xs text-muted-foreground">Character limit reached.</p>}
+      <div className="flex items-center justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={!name || !body}>Save rule</Button>
+      </div>
+    </form>
   )
 }

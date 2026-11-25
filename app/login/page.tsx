@@ -2,11 +2,12 @@ import { Suspense } from 'react'
 import Image from 'next/image'
 import { redirect } from 'next/navigation'
 import { Mark } from '@/components/TopBar'
+import { SampleCanvasPreview } from '@/components/CanvasPreview'
 import { Button } from '@/components/ui/button'
 import { canvasReturnPath, googleAuthConfigured } from '@/lib/auth-access'
 import { startGoogleSignIn } from './actions'
 
-export const metadata = { title: 'Sign in to Zeko' }
+export const metadata = { title: 'Zeko | Design with your coding agent' }
 
 async function SignInForm({ searchParams }: Pick<PageProps<'/login'>, 'searchParams'>) {
   const params = await searchParams
@@ -17,7 +18,7 @@ async function SignInForm({ searchParams }: Pick<PageProps<'/login'>, 'searchPar
     : params.error ? 'Sign-in failed. Try again with your Google account.' : undefined
 
   return (
-    <form action={startGoogleSignIn} className="flex w-full max-w-64 flex-col items-center gap-4">
+    <form action={startGoogleSignIn} className="flex flex-col items-start gap-3">
       <input type="hidden" name="next" value={next} />
       {error && <p role="alert" className="text-pretty text-sm text-destructive">{error}</p>}
       <Button type="submit" variant="ghost" className="h-auto p-0">
@@ -29,20 +30,19 @@ async function SignInForm({ searchParams }: Pick<PageProps<'/login'>, 'searchPar
 
 export default function Login({ searchParams }: PageProps<'/login'>) {
   return (
-    <main className="grid min-h-dvh place-items-center overflow-auto px-6 py-10">
-      <section className="panel flex w-full max-w-sm flex-col items-center gap-6 px-8 py-10 text-center">
-        <div className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-          <Mark size={23} />
-          zeko
-        </div>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Sign in to Zeko</h1>
-          <p className="text-sm text-muted-foreground">Use your Google account to open your private workspace.</p>
-        </div>
-        <Suspense fallback={null}>
-          <SignInForm searchParams={searchParams} />
-        </Suspense>
-      </section>
+    <main className="h-dvh overflow-auto px-6 sm:px-10">
+      <div className="mx-auto grid min-h-full max-w-[1140px] items-center gap-10 py-12 lg:grid-cols-[0.83fr_1.17fr] lg:gap-18">
+        <section className="flex max-w-lg flex-col items-start gap-5">
+          <div className="flex items-center gap-2 text-lg font-semibold tracking-tight"><Mark size={26} /> zeko</div>
+          <h1 className="text-balance text-4xl leading-[1.06] font-medium tracking-[-0.045em] sm:text-5xl">Design with your coding agent</h1>
+          <p className="max-w-sm text-pretty text-base leading-relaxed text-muted-foreground">Sketch screens, compare variations, and try a flow in one canvas.</p>
+          <Suspense fallback={null}>
+            <SignInForm searchParams={searchParams} />
+          </Suspense>
+          <a className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground" href="https://github.com/bottercode/zeko">View source on GitHub</a>
+        </section>
+        <div aria-hidden><SampleCanvasPreview /></div>
+      </div>
     </main>
   )
 }

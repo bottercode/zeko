@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { applyOp, inverseOf } from '../ops'
 import type { Actor, Board, Op } from '../types'
+import { returnToSignIn } from './sign-in'
 
 export const ME: Actor = { kind: 'human', name: 'You' }
 
@@ -33,7 +34,11 @@ export function useBoard(boardId: string) {
     source.onerror = () => {
       // An unknown canvas answers 404, which the browser reports only as an error. Ask once to tell them apart.
       void fetch(`/api/board${q}`)
-        .then((r) => {
+        .then(async (r) => {
+          if (await returnToSignIn(r)) {
+            source.close()
+            return
+          }
           if (r.status === 404) {
             source.close()
             setConnection('missing')
@@ -69,7 +74,8 @@ export function useBoard(boardId: string) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(op),
-      }).then((response) => {
+      }).then(async (response) => {
+        if (await returnToSignIn(response)) return
         if (!response.ok) setConnection('offline')
       }).catch(() => setConnection('offline'))
     },

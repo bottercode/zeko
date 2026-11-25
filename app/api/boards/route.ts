@@ -1,6 +1,6 @@
 import { connection } from 'next/server'
 import { nanoid } from 'nanoid'
-import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode, withWorkspace } from '@/lib/server/store'
+import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode, withWorkspace, workspaceStarted } from '@/lib/server/store'
 import type { Board } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
 import { readMemoryRules, readSketchComponents } from '@/lib/ops'
@@ -12,7 +12,13 @@ import { readAcpSelection } from '@/lib/acp'
 async function handleGet(_request: Request) {
   await connection()
   await prepareStore()
-  return Response.json({ canvases: listBoards(), agents: knownAgents(), storage: storageMode, hosted: process.env.ZEKO_HOSTED === '1' })
+  return Response.json({
+    canvases: listBoards(),
+    agents: knownAgents(),
+    storage: storageMode,
+    hosted: process.env.ZEKO_HOSTED === '1',
+    started: workspaceStarted(),
+  })
 }
 
 interface CreateBody {

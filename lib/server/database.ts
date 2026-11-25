@@ -84,6 +84,7 @@ export function databasePersistence(db: ReturnType<typeof connectDatabase>['db']
       await db.select({ id: table.id }).from(table).where(owner).limit(1)
     },
     load,
+    hasStoredCanvases: () => revisions.size > 0,
     reserved: (id: string) => revisions.has(id) || writes.has(id),
     enqueue(id: string, snapshot: Board, archivedAt: Date | null = null) {
       const queue = writes.get(id) ?? {}

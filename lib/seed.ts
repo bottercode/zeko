@@ -68,6 +68,8 @@ const pricingAiry = `<!doctype html><html><head><style>${base}
   </div>
 </main></body></html>`
 
+export const samplePricingPreview = { html: pricingAiry, w: 1280, h: 800 }
+
 const pricingCompare = `<!doctype html><html><head><style>${base}
   main{padding:52px 64px}
   h1{font-size:36px;letter-spacing:-.03em}
@@ -218,7 +220,7 @@ Decisions
   board.frames = [
     frame({ id: 'start', name: 'Start here', kind: 'sketch', x: -720, y: 0, w: 560, h: 520, html: startHere }, t),
     frame({ id: 'pricing-v1', name: 'Pricing', kind: 'sketch', x: 0, y: 0, w: 1280, h: 800, html: pricingCurrent, route: '/pricing', state: 'default', deckId: 'pricing' }, t + 1),
-    frame({ id: 'pricing-v2', name: 'Pricing · v2', kind: 'sketch', x: 0, y: 0, w: 1280, h: 800, html: pricingAiry, route: '/pricing', state: 'default', deckId: 'pricing' }, t + 2),
+    frame({ id: 'pricing-v2', name: 'Pricing · v2', kind: 'sketch', x: 0, y: 0, ...samplePricingPreview, route: '/pricing', state: 'default', deckId: 'pricing' }, t + 2),
     frame({ id: 'pricing-v3', name: 'Pricing · v3', kind: 'sketch', x: 0, y: 0, w: 1280, h: 800, html: pricingCompare, route: '/pricing', state: 'default', deckId: 'pricing' }, t + 3),
     frame({ id: 'pricing-empty', name: 'Pricing, no coverage', kind: 'sketch', x: 1440, y: 0, w: 1280, h: 800, html: pricingEmpty, route: '/pricing', state: 'empty' }, t + 4),
     frame({ id: 'checkout-error', name: 'Checkout, card declined', kind: 'sketch', x: 0, y: 1120, w: 1280, h: 800, html: checkoutError, route: '/checkout', state: 'error' }, t + 5),

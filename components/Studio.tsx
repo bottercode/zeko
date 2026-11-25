@@ -53,10 +53,12 @@ function savedSidePanelWidth() {
   }
 }
 
-export function Studio({ boardId, sampleGuide }: { boardId: string; sampleGuide?: boolean }) {
+type StudioProps = { boardId: string; sampleGuide?: boolean; firstCanvas?: boolean }
+
+export function Studio({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   return (
     <ToastProvider>
-      <StudioInner key={boardId} boardId={boardId} sampleGuide={sampleGuide} />
+      <StudioInner key={boardId} boardId={boardId} sampleGuide={sampleGuide} firstCanvas={firstCanvas} />
     </ToastProvider>
   )
 }
@@ -69,7 +71,7 @@ interface ConfirmState {
   onConfirm: () => void
 }
 
-function StudioInner({ boardId, sampleGuide }: { boardId: string; sampleGuide?: boolean }) {
+function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const { board, dispatch, undo, redo, history, connection, reset, importBoard } = useBoard(boardId)
   const now = useNow()
   const toast = useToast()
@@ -78,8 +80,8 @@ function StudioInner({ boardId, sampleGuide }: { boardId: string; sampleGuide?: 
   const [panelPreference, setPanelClosed] = useState<boolean>()
   const [preferredPanelWidth, setPreferredPanelWidth] = useState(savedSidePanelWidth)
   const viewport = useSyncExternalStore(subscribeToViewport, viewportWidth, serverViewportWidth)
-  const leftClosed = leftPreference ?? viewport < 768
-  const panelClosed = panelPreference ?? viewport < 900
+  const leftClosed = leftPreference ?? (firstCanvas || viewport < 768)
+  const panelClosed = panelPreference ?? (firstCanvas || viewport < 900)
   const railLeft = leftClosed ? 8 : LEFT_PANEL_WIDTH + 16
   const leftInset = railLeft + 56
   const maxPanelWidth = Math.max(SIDE_PANEL.minWidth, Math.min(SIDE_PANEL.maxWidth, viewport - leftInset - 200))
@@ -539,7 +541,10 @@ function StudioInner({ boardId, sampleGuide }: { boardId: string; sampleGuide?: 
               </Link>
             </>
           ) : connection === 'offline' ? (
-            'Can’t reach the Zeko server. Start it with npm run dev.'
+            <>
+              Couldn’t open this canvas.
+              <button className="text-ink underline underline-offset-4" onClick={() => window.location.reload()}>Try again</button>
+            </>
           ) : (
             'Opening the canvas…'
           )}

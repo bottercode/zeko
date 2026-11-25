@@ -114,7 +114,8 @@ export function TopBar({ connection, onImport, placeImages, connectOpen, onConne
     ],
     [
       { label: 'Share', hint: 'Copy a link to this board', Icon: Link2, run: share },
-      { label: 'Play', hint: 'Play the prototype', accessibleLabel: 'Play the prototype', Icon: Play, run: () => play() },
+      { label: 'Play', hint: 'Play the prototype', accessibleLabel: 'Play the prototype', Icon: Play, run: () => play(),
+        disabled: !board.frames.some((frame) => frame.kind === 'sketch' && !!frame.html && !frame.shape) },
     ],
   ]
 
@@ -145,9 +146,9 @@ export function TopBar({ connection, onImport, placeImages, connectOpen, onConne
 
       {/* Center: what the agents are doing */}
       <div className="hidden min-w-0 flex-1 justify-center lg:flex">
-        <div className="panel pointer-events-auto flex h-10 min-w-0 max-w-full items-center px-1">
+        {agents.length > 0 && <div className="panel pointer-events-auto flex h-10 min-w-0 max-w-full items-center px-1">
           <StatusPill agents={agents} />
-        </div>
+        </div>}
       </div>
 
       {/* Right: board actions */}
@@ -321,27 +322,21 @@ function GroupButton({ children, label, className, ...props }: Omit<React.Compon
 
 function StatusPill({ agents }: { agents: AgentPresence[] }) {
   const shown = agents[0]
+  if (!shown) return null
   return (
     <div className="flex h-8 max-w-[420px] min-w-0 items-center gap-2 pr-2.5 pl-1">
       <div className="flex shrink-0 items-center -space-x-1">
-        <span className="grid size-5 place-items-center rounded-full border-[1.5px] border-lightbox bg-ink text-[9px] font-semibold text-on-ink">Y</span>
         {agents.map((a) => (
           <span key={a.name} title={a.name} className="rounded-md bg-lightbox ring-1 ring-lightbox">
             <AgentAvatar name={a.name} />
           </span>
         ))}
       </div>
-      {shown ? (
-        <span role="status" className="flex min-w-0 items-center gap-1.5 text-xs">
-          <span className="size-1.5 shrink-0 rounded-full bg-live" />
-          <span className="shrink-0 font-medium">{shown.name}</span>
-          <span className="truncate text-slate">{agents.length > 1 ? `and ${agents.length - 1} more online` : 'online'}</span>
-        </span>
-      ) : (
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate">
-          <span className="size-1.5 shrink-0 rounded-full bg-mist" /> <span className="truncate">No agent on the board</span>
-        </span>
-      )}
+      <span role="status" className="flex min-w-0 items-center gap-1.5 text-xs">
+        <span className="size-1.5 shrink-0 rounded-full bg-live" />
+        <span className="shrink-0 font-medium">{shown.name}</span>
+        <span className="truncate text-slate">{agents.length > 1 ? `and ${agents.length - 1} more online` : 'online'}</span>
+      </span>
     </div>
   )
 }

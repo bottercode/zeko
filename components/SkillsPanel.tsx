@@ -8,7 +8,6 @@ import type { CanvasSkill } from '@/lib/types'
 import { IconButton } from './kit'
 import { useStudio } from './studio-context'
 import { Button } from './ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from './ui/field'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
@@ -34,11 +33,11 @@ export function SkillsPanel() {
     <section aria-labelledby="memory-skills" className="px-3 py-3.5">
       <div className="mb-2.5 flex min-w-0 items-center justify-between gap-2">
         <h2 id="memory-skills" className="text-xs font-semibold text-muted-foreground">Canvas skills</h2>
-        <Button size="sm" variant="secondary" onClick={() => setEditing('new')}>
+        {!editing && <Button size="sm" variant="secondary" onClick={() => setEditing('new')}>
           <Plus data-icon="inline-start" aria-hidden /> Add skill
-        </Button>
+        </Button>}
       </div>
-      {skills.length ? (
+      {editing ? <SkillEditor skill={editing === 'new' ? undefined : editing} onSave={save} onClose={() => setEditing(null)} /> : skills.length ? (
         <ul className="divide-y divide-hair">
           {skills.map((skill) => (
             <li key={skill.id} className="flex min-w-0 items-center gap-1 py-1">
@@ -60,7 +59,6 @@ export function SkillsPanel() {
           ))}
         </ul>
       ) : <p className="text-sm leading-relaxed text-muted-foreground">Add reusable instructions for tasks that come up on this canvas.</p>}
-      {editing && <SkillEditor skill={editing === 'new' ? undefined : editing} onSave={save} onClose={() => setEditing(null)} />}
     </section>
   )
 }
@@ -100,81 +98,73 @@ function SkillEditor({ skill, onSave, onClose }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{skill ? 'Edit skill' : 'Add canvas skill'}</DialogTitle>
-          <DialogDescription>Agents use this skill when its description matches their task.</DialogDescription>
-        </DialogHeader>
-        <form className="flex flex-col gap-3.5" onSubmit={(event) => {
-          event.preventDefault()
-          if (canSave && !loading) onSave(draft)
+    <form aria-label={skill ? 'Edit skill' : 'Add skill'} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3" onSubmit={(event) => {
+      event.preventDefault()
+      if (canSave && !loading) onSave(draft)
+    }}>
+      {!skill && (
+        <ToggleGroup aria-label="Skill source" variant="outline" spacing={0} className="w-full" value={[mode]} onValueChange={([value]) => {
+          if (loading || (value !== 'write' && value !== 'url')) return
+          setMode(value)
+          setError('')
         }}>
-          {!skill && (
-            <ToggleGroup aria-label="Skill source" variant="outline" spacing={0} className="w-full" value={[mode]} onValueChange={([value]) => {
-              if (loading || (value !== 'write' && value !== 'url')) return
-              setMode(value)
-              setError('')
-            }}>
-              <ToggleGroupItem type="button" className="flex-1" value="write">Write instructions</ToggleGroupItem>
-              <ToggleGroupItem type="button" className="flex-1" value="url">Import from URL</ToggleGroupItem>
-            </ToggleGroup>
-          )}
-          {mode === 'url' && (
-            <Field data-invalid={!!error} className="gap-1.5">
-              <FieldLabel htmlFor="skill-source-url">File URL</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input id="skill-source-url" name="skill-source-url" type="url" value={url} disabled={loading}
-                  aria-invalid={!!error} aria-describedby={error ? 'skill-url-error' : 'skill-url-help'}
-                  onChange={(event) => { setUrl(event.currentTarget.value); setError('') }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return
-                    event.preventDefault()
-                    void load()
-                  }}
-                  placeholder="https://…/SKILL.md" autoComplete="off" spellCheck={false} />
-                <Button type="button" variant="secondary" className="shrink-0" disabled={!url.trim() || loading} onClick={() => void load()}>
-                  {loading && <LoaderCircle data-icon="inline-start" className="motion-safe:animate-spin" aria-hidden />}
-                  {loading ? 'Loading…' : 'Load file'}
-                </Button>
-              </div>
-              {error ? <FieldError id="skill-url-error">{error}</FieldError> : <FieldDescription id="skill-url-help">Use a public Markdown file or a GitHub link to it.</FieldDescription>}
-            </Field>
-          )}
-          {hasDraft && (
-            <FieldGroup className="gap-3">
-              {draft.sourceUrl && (
-                <p role="status" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  <Link2 size={13} className="shrink-0" aria-hidden />
-                  <span className="truncate" title={draft.sourceUrl}>{draft.sourceUrl}</span>
-                </p>
-              )}
-              <Field className="gap-1.5">
-                <FieldLabel htmlFor="canvas-skill-title">Skill name</FieldLabel>
-                <Input id="canvas-skill-title" name="skill-name" autoComplete="off" value={draft.title}
-                  onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
-                  maxLength={SKILL_TITLE_LIMIT} placeholder="Accessibility review" required />
-              </Field>
-              <Field className="gap-1.5">
-                <FieldLabel htmlFor="canvas-skill-description">When to use it</FieldLabel>
-                <Input id="canvas-skill-description" name="skill-description" autoComplete="off" value={draft.description}
-                  onChange={(event) => setDraft({ ...draft, description: event.currentTarget.value })}
-                  maxLength={SKILL_DESCRIPTION_LIMIT} placeholder="Use when reviewing a screen for accessibility" />
-              </Field>
-              <Field className="gap-1.5">
-                <FieldLabel htmlFor="canvas-skill-text">Instructions</FieldLabel>
-                <Textarea id="canvas-skill-text" name="skill-instructions" value={draft.text}
-                  onChange={(event) => setDraft({ ...draft, text: event.currentTarget.value })}
-                  maxLength={SKILL_TEXT_LIMIT} placeholder="Describe the steps the agent should follow…" className="min-h-44 resize-y" required />
-              </Field>
-            </FieldGroup>
-          )}
-          <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={!canSave || loading}>{skill ? 'Save skill' : 'Install skill'}</Button>
+          <ToggleGroupItem type="button" className="flex-1" value="write">Write</ToggleGroupItem>
+          <ToggleGroupItem type="button" className="flex-1" value="url">Import link</ToggleGroupItem>
+        </ToggleGroup>
+      )}
+      {mode === 'url' && (
+        <Field data-invalid={!!error} className="gap-1.5">
+          <FieldLabel htmlFor="skill-source-url">File URL</FieldLabel>
+          <div className="flex items-center gap-2">
+            <Input id="skill-source-url" name="skill-source-url" type="url" value={url} disabled={loading}
+              aria-invalid={!!error} aria-describedby={error ? 'skill-url-error' : 'skill-url-help'}
+              onChange={(event) => { setUrl(event.currentTarget.value); setError('') }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                void load()
+              }}
+              placeholder="https://…/SKILL.md" autoComplete="off" spellCheck={false} />
+            <Button type="button" variant="secondary" className="shrink-0" disabled={!url.trim() || loading} onClick={() => void load()}>
+              {loading && <LoaderCircle data-icon="inline-start" className="motion-safe:animate-spin" aria-hidden />}
+              {loading ? 'Loading…' : 'Load file'}
+            </Button>
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {error ? <FieldError id="skill-url-error">{error}</FieldError> : <FieldDescription id="skill-url-help">Use a public Markdown file or a GitHub link to it.</FieldDescription>}
+        </Field>
+      )}
+      {hasDraft && (
+        <FieldGroup className="gap-3">
+          {draft.sourceUrl && (
+            <p role="status" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <Link2 size={13} className="shrink-0" aria-hidden />
+              <span className="truncate" title={draft.sourceUrl}>{draft.sourceUrl}</span>
+            </p>
+          )}
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="canvas-skill-title">Skill name</FieldLabel>
+            <Input id="canvas-skill-title" name="skill-name" autoComplete="off" value={draft.title}
+              onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
+              maxLength={SKILL_TITLE_LIMIT} placeholder="Accessibility review" required />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="canvas-skill-description">When to use it</FieldLabel>
+            <Input id="canvas-skill-description" name="skill-description" autoComplete="off" value={draft.description}
+              onChange={(event) => setDraft({ ...draft, description: event.currentTarget.value })}
+              maxLength={SKILL_DESCRIPTION_LIMIT} placeholder="Use when reviewing a screen for accessibility" />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor="canvas-skill-text">Instructions</FieldLabel>
+            <Textarea id="canvas-skill-text" name="skill-instructions" value={draft.text}
+              onChange={(event) => setDraft({ ...draft, text: event.currentTarget.value })}
+              maxLength={SKILL_TEXT_LIMIT} placeholder="What steps should the agent follow?" className="min-h-24 max-h-60 resize-y" required />
+          </Field>
+        </FieldGroup>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={!canSave || loading}>Save skill</Button>
+      </div>
+    </form>
   )
 }

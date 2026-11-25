@@ -74,11 +74,13 @@ Zeko reads models, thinking effort, and other session settings from the selected
 
 ## Zeko CLI
 
-Install Node.js 20.9 or later, then install the CLI from the GitHub release.
+Install Node.js 20.9 or later, then install the CLI from npm.
 
 ```bash
-npm install -g "https://github.com/bottercode/zeko/releases/download/cli-v0.2.0/zeko-cli-0.2.0.tgz"
+npm install -g @botter_code/zeko
 ```
+
+If you installed the earlier GitHub release, run `npm uninstall -g @zeko/cli` before installing from npm.
 
 Open a canvas and select **Connect an agent → Zeko CLI**. The dialog provides commands for Codex or Claude Code. For hosted Zeko, `zeko connect` saves the workspace token on your computer, and `zeko launch` starts your coding agent with that canvas attached. Run the launch command in the repository you want your agent to work on.
 

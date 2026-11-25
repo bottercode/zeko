@@ -1,5 +1,5 @@
 {
-  "name": "@zeko/cli",
+  "name": "@botter_code/zeko",
   "version": "0.2.0",
   "license": "MIT",
   "description": "Connect Codex and Claude Code to a Zeko canvas.",

@@ -23,9 +23,11 @@ import {
 } from 'lucide-react'
 import { acpAgent, type AcpAgentId } from '@/lib/acp'
 import { agentIsOnline } from '@/lib/ops'
-import { SAMPLE_ID, seedBoard } from '@/lib/seed'
+import { SAMPLE_ID } from '@/lib/seed'
 import { ago, useNow } from '@/lib/client/useBoard'
+import { returnToSignIn } from '@/lib/client/sign-in'
 import { AgentAvatar } from './AgentAvatar'
+import { CanvasPreview, SampleCanvasPreview, type CanvasCover } from './CanvasPreview'
 import { ConnectDialog } from './ConnectDialog'
 import { ChoiceSelect } from './ChoiceSelect'
 import { Button } from './ui/button'
@@ -33,7 +35,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldGroup, FieldLabel } from './ui/field'
 import { Input } from './ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from './ui/input-group'
-import { Skeleton } from './ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
 import { Mark } from './TopBar'
 import { AcpAgentPicker, useAcpAgents } from './AcpComposerOptions'
@@ -47,7 +48,7 @@ interface Canvas {
   frames: number
   openTasks: number
   agents: string[]
-  cover: { html: string; w: number; h: number } | null
+  cover: CanvasCover | null
 }
 interface SeenAgent {
   name: string
@@ -84,6 +85,7 @@ function HomeInner({ account }: { account?: ReactNode }) {
   const now = useNow()
   const [canvases, setCanvases] = useState<Canvas[] | null>(null)
   const [hosted, setHosted] = useState(false)
+  const [started, setStarted] = useState(true)
   const [presence, setPresence] = useState<SeenAgent[]>([])
   const [offline, setOffline] = useState(false)
   const [sidebar, setSidebar] = useState<boolean | null>(null)
@@ -104,10 +106,12 @@ function HomeInner({ account }: { account?: ReactNode }) {
   const load = async () => {
     try {
       const res = await fetch('/api/boards', { cache: 'no-store' })
+      if (await returnToSignIn(res)) return
       if (!res.ok) throw new Error('Could not load canvases')
-      const data = (await res.json()) as { canvases: Canvas[]; hosted?: boolean }
+      const data = (await res.json()) as { canvases: Canvas[]; hosted?: boolean; started?: boolean }
       setCanvases(data.canvases)
       setHosted(data.hosted === true)
+      setStarted(data.started ?? data.canvases.length > 0)
       setOffline(false)
     } catch {
       setOffline(true)
@@ -133,19 +137,20 @@ function HomeInner({ account }: { account?: ReactNode }) {
     return () => source.close()
   }, [])
 
-  const create = async (body: Record<string, unknown>) => {
+  const create = async (body: Record<string, unknown>, welcome = body.sample === 'open' ? 'sample' : '') => {
     if (creatingRef.current) return
     creatingRef.current = true
     setCreating(true)
     try {
       const res = await fetch('/api/boards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (await returnToSignIn(res)) return
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
       if (!res.ok || !data.id) {
         toast(data.error ?? 'Couldn’t make the canvas.')
         return
       }
       setNewCanvasOpen(false)
-      router.push(`/c/${data.id}${body.sample === 'open' ? '?welcome=sample' : ''}`)
+      router.push(`/c/${data.id}${welcome ? `?welcome=${welcome}` : ''}`)
     } catch {
       toast('Couldn’t reach Zeko. Try again.')
     } finally {
@@ -232,7 +237,49 @@ function HomeInner({ account }: { account?: ReactNode }) {
     .filter((c) => !q || c.name.toLowerCase().includes(q))
     .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : sort === 'created' ? b.createdAt - a.createdAt : b.updatedAt - a.updatedAt))
   const waiting = (canvases ?? []).filter((c) => c.openTasks > 0).length
-  const firstRun = canvases !== null && canvases.length === 0
+  const importInput = (
+    <input
+      ref={file}
+      type="file"
+      accept=".json,application/json"
+      className="hidden"
+      onChange={(event) => {
+        const selected = event.currentTarget.files?.[0]
+        event.currentTarget.value = ''
+        if (selected) void importFile(selected)
+      }}
+    />
+  )
+
+  if (!canvases) {
+    return (
+      <main className="grid h-full place-items-center px-6 text-center">
+        <div className="flex flex-col items-center gap-4">
+          <Mark size={34} />
+          {offline ? (
+            <>
+              <h1 className="text-base font-medium">Couldn’t open your workspace</h1>
+              <Button variant="outline" onClick={() => void load()}>Try again</Button>
+            </>
+          ) : <p role="status" className="text-sm text-muted-foreground">Opening your workspace…</p>}
+        </div>
+      </main>
+    )
+  }
+
+  if (!started && canvases.length === 0) {
+    return (
+      <div className="flex h-full flex-col overflow-auto">
+        {importInput}
+        <header className="flex min-h-16 items-center justify-between gap-3 border-b border-border px-5 sm:px-10">
+          <div className="flex items-center gap-2 text-base font-semibold"><Mark size={24} /> zeko</div>
+          <div className="max-w-56 [&>form]:border-0 [&>form]:px-0">{account}</div>
+        </header>
+        <FirstCanvas busy={creating} onCreate={(name) => void create({ name }, 'canvas')}
+          onSample={() => void create({ sample: 'open' })} onImport={() => file.current?.click()} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full">
@@ -304,28 +351,14 @@ function HomeInner({ account }: { account?: ReactNode }) {
       <main className="relative min-w-0 flex-1 overflow-auto">
         <div className="absolute top-3 right-4 z-10 flex items-center gap-2">
           <Button disabled={creating} variant="outline" size="lg" onClick={() => file.current?.click()}><Upload data-icon="inline-start" aria-hidden /> Import</Button>
-          {!firstRun && <Button size="lg" disabled={creating} onClick={() => setNewCanvasOpen(true)}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>}
-          <input
-            ref={file}
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              e.target.value = ''
-              if (f) void importFile(f)
-            }}
-          />
+          <Button size="lg" disabled={creating} onClick={() => setNewCanvasOpen(true)}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>
+          {importInput}
         </div>
 
-        {firstRun ? (
-          <FirstCanvas busy={creating} onNew={() => setNewCanvasOpen(true)} onSample={() => void create({ sample: 'open' })} />
-        ) : canvases !== null && !hosted ? (
-          <Hero onCreate={create} />
-        ) : null}
+        {!hosted && <Hero onCreate={create} />}
 
         {/* Canvases */}
-        {!firstRun && <section className={cx('mx-auto max-w-[1180px] px-4 pb-16 sm:px-8', (hosted || canvases === null) && 'pt-20 sm:pt-24')}>
+        <section className={cx('mx-auto max-w-[1180px] px-4 pb-16 sm:px-8', hosted && 'pt-20 sm:pt-24')}>
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <h2 className="text-[15px] font-semibold">{view === 'waiting' ? 'Waiting on agents' : 'Canvases'}</h2>
             <span className="text-sm text-mist tabular-nums">{shown.length}</span>
@@ -353,32 +386,18 @@ function HomeInner({ account }: { account?: ReactNode }) {
             </ToggleGroup>
           </div>
 
-          {offline && <p className="py-8 text-center text-sm text-slate">Can’t reach the Zeko server. Start it and this page fills in.</p>}
-          {canvases && shown.length === 0 && (q || view === 'waiting') && (
-            <p className="py-8 text-center text-sm text-slate">{q ? `No canvas matches “${filter.trim()}”.` : 'No canvas has a request waiting.'}</p>
+          {offline && <p role="status" className="py-5 text-center text-sm text-slate">Couldn’t refresh your canvases. Retrying…</p>}
+          {shown.length === 0 && (
+            <p className="py-8 text-center text-sm text-slate">{q ? `No canvas matches “${filter.trim()}”.` : view === 'waiting' ? 'No canvas has a request waiting.' : 'No active canvases.'}</p>
           )}
 
           {layout === 'grid' ? (
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
-              {canvases === null && !offline && [0, 1, 2].map((i) => <li key={i}><Skeleton className="h-[214px] rounded-xl motion-reduce:animate-none" /></li>)}
               {shown.map((c) => (
                 <li key={c.id}>
                   <Card c={c} now={now} renaming={renaming === c.id} onRename={(n) => void rename(c, n)} onMenu={(x, y) => cardMenu(c, x, y)} />
                 </li>
               ))}
-              {canvases && !q && view === 'all' && (
-                <li>
-                  <button
-                    onClick={() => setNewCanvasOpen(true)}
-                    className="flex h-[214px] w-full flex-col items-center justify-center gap-2 rounded-xl text-sm text-slate shadow-[inset_0_0_0_1px_var(--color-hair)] [background-image:radial-gradient(var(--color-hair)_1px,transparent_1px)] [background-size:16px_16px] hover:text-ink hover:shadow-[inset_0_0_0_1px_var(--color-mist)]"
-                  >
-                    <span className="grid size-8 place-items-center rounded-full bg-wash">
-                      <Plus size={15} />
-                    </span>
-                    New canvas
-                  </button>
-                </li>
-              )}
             </ul>
           ) : (
             <div className="overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--color-hair)]">
@@ -415,7 +434,7 @@ function HomeInner({ account }: { account?: ReactNode }) {
               ))}
             </div>
           )}
-        </section>}
+        </section>
       </main>
 
       <Dialog open={newCanvasOpen} onOpenChange={(open) => { if (!creating) setNewCanvasOpen(open) }}>
@@ -448,37 +467,46 @@ function HomeInner({ account }: { account?: ReactNode }) {
   )
 }
 
-function FirstCanvas({ busy, onNew, onSample }: { busy: boolean; onNew: () => void; onSample: () => void }) {
-  const [sample] = useState(() => seedBoard().frames.find((frame) => frame.id === 'pricing-v2'))
-  const preview = sample?.html ? { html: sample.html, w: sample.w, h: sample.h } : null
-
+function FirstCanvas({ busy, onCreate, onSample, onImport }: {
+  busy: boolean
+  onCreate: (name: string) => void
+  onSample: () => void
+  onImport: () => void
+}) {
   return (
-    <section className="mx-auto grid min-h-full w-full max-w-[1250px] items-center gap-10 px-6 py-20 sm:px-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-14 lg:px-12">
-      <div className="max-w-xl">
-        <Mark size={36} />
-        <h1 className="mt-6 text-balance text-4xl leading-[1.06] font-medium tracking-[-0.045em] sm:text-5xl">Make your first canvas</h1>
-        <p className="mt-4 max-w-sm text-pretty text-base leading-relaxed text-muted-foreground">
-          Lay out screens, compare variations, and design with the coding agent you already use.
-        </p>
-        <div className="mt-7 flex flex-wrap gap-2.5">
-          <Button size="lg" disabled={busy} onClick={onNew}><Plus data-icon="inline-start" aria-hidden /> New canvas</Button>
-          <Button size="lg" variant="outline" disabled={busy} onClick={onSample}>
-            {busy ? 'Opening…' : 'Explore sample'} <ArrowUpRight data-icon="inline-end" aria-hidden />
-          </Button>
-        </div>
-      </div>
-      <figure className="overflow-hidden rounded-2xl border border-border bg-card shadow-float">
-        <div className="p-5 sm:p-8 [background-image:radial-gradient(var(--color-hair)_1px,transparent_1px)] [background-size:16px_16px]">
-          <div aria-hidden className="overflow-hidden rounded-lg border border-border shadow-float">
-            <Cover cover={preview} className="h-auto aspect-[8/5]" />
+    <main className="mx-auto grid w-full max-w-[1140px] flex-1 items-center gap-10 px-6 py-12 sm:px-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-18">
+      <div className="max-w-sm">
+        <h1 className="text-balance text-4xl leading-[1.06] font-medium tracking-[-0.045em] sm:text-5xl">Create your first canvas</h1>
+        <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground">Start with a project you’re working on. You can connect an agent once the canvas is open.</p>
+        <form className="mt-7 flex flex-col items-start gap-4" onSubmit={(event) => {
+          event.preventDefault()
+          const name = String(new FormData(event.currentTarget).get('name') ?? '').trim()
+          onCreate(name)
+        }}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="first-canvas-name">Canvas name</FieldLabel>
+              <Input id="first-canvas-name" name="name" placeholder="e.g. Mobile checkout" maxLength={120} disabled={busy} />
+            </Field>
+          </FieldGroup>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" size="lg" disabled={busy}><Plus data-icon="inline-start" aria-hidden /> Create canvas</Button>
+            <Button type="button" variant="ghost" size="lg" disabled={busy} onClick={onImport}>Import a canvas</Button>
           </div>
+          {busy && <p role="status" className="text-xs text-muted-foreground">Opening canvas…</p>}
+        </form>
+      </div>
+      <section aria-labelledby="sample-title" className="flex flex-col gap-4">
+        <SampleCanvasPreview />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="sample-title" className="text-sm font-medium">Fernway pricing sample</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Compare design variants and try a checkout prototype.</p>
+          </div>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onSample}>Explore sample <ArrowUpRight data-icon="inline-end" aria-hidden /></Button>
         </div>
-        <figcaption className="flex items-center justify-between gap-3 border-t border-border px-4 py-3.5">
-          <span className="text-sm font-medium">Fernway pricing</span>
-          <span className="text-right text-xs text-muted-foreground">Sample canvas</span>
-        </figcaption>
-      </figure>
-    </section>
+      </section>
+    </main>
   )
 }
 
@@ -603,7 +631,7 @@ function Card({ c, now, renaming, onRename, onMenu }: { c: Canvas; now: number; 
       className="group relative overflow-hidden rounded-xl bg-white/[0.02] shadow-[inset_0_0_0_1px_var(--color-hair)] transition-shadow hover:shadow-[inset_0_0_0_1px_var(--color-mist)]"
     >
       <Link href={`/c/${c.id}`} aria-label={`Open ${c.name}`} className="block">
-        <Cover cover={c.cover} />
+        <CanvasPreview cover={c.cover} />
       </Link>
       <div className="flex items-center gap-2 border-t border-hair-soft px-3.5 py-3">
         <div className="min-w-0 flex-1">
@@ -655,40 +683,5 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (name: stri
       }}
       className="h-7 w-full rounded-md bg-white/[0.04] px-2 font-medium shadow-[inset_0_0_0_1px_var(--color-grease)] outline-none"
     />
-  )
-}
-
-/** The canvas's first screen, scaled down to fit the card. Scripts don't run here. */
-function Cover({ cover, className }: { cover: Canvas['cover']; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const ro = new ResizeObserver(([e]) => setWidth(e!.contentRect.width))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-  if (!cover) {
-    return (
-      <div className="grid h-[150px] place-items-center text-sm text-mist [background-image:radial-gradient(var(--color-hair)_1px,transparent_1px)] [background-size:16px_16px]">
-        Empty canvas
-      </div>
-    )
-  }
-  const scale = width ? width / cover.w : 0
-  return (
-    <div ref={ref} className={cx('relative overflow-hidden bg-white', className ?? 'h-[150px]')}>
-      {scale > 0 && (
-        <iframe
-          title=""
-          tabIndex={-1}
-          sandbox=""
-          srcDoc={cover.html}
-          className="pointer-events-none absolute top-0 left-0 origin-top-left border-0"
-          style={{ width: cover.w, height: cover.h, transform: `scale(${scale})` }}
-        />
-      )}
-    </div>
   )
 }

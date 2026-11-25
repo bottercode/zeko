@@ -376,6 +376,11 @@ export interface CanvasSummary {
   cover: { html: string; w: number; h: number } | null
 }
 
+export function workspaceStarted() {
+  const { entries, database } = state()
+  return entries.size > 0 || (database?.hasStoredCanvases() ?? false)
+}
+
 const COVER_LIMIT = 250_000
 
 export function listBoards(): CanvasSummary[] {
