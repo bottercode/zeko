@@ -8,12 +8,11 @@ import { imageSketch, isBoardImage } from '@/lib/client/images'
 import { frameIdOf, noteBridgeHtml, sendToFrame, type ElementInfo, type Hotspot, type LayerNode, type ToFrame } from '@/lib/client/bridge'
 import type { Frame, Op, SketchComponent } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
-import { Canvas } from './Canvas'
+import { Canvas, ZoomPill } from './Canvas'
 import { GettingStarted } from './GettingStarted'
 import { Loupe } from './Loupe'
 import { LeftPanel } from './LeftPanel'
 import { Player } from './Player'
-import { CornerControls } from './CornerControls'
 import { SearchDialog } from './SearchDialog'
 import { ShortcutsDialog } from './Shortcuts'
 import { DesignPanel, SidePanel } from './SidePanel'
@@ -72,7 +71,7 @@ interface ConfirmState {
 }
 
 function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
-  const { board, dispatch, undo, redo, history, connection, reset, importBoard } = useBoard(boardId)
+  const { board, dispatch, undo, redo, history, connection, importBoard } = useBoard(boardId)
   const now = useNow()
   const toast = useToast()
   const stageRef = useRef<HTMLDivElement>(null)
@@ -567,7 +566,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
           connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} />
         <LeftPanel closed={leftClosed} onClose={() => setLeftClosed(true)} />
         {sampleGuide && <GettingStarted left={railLeft} />}
-        <CornerControls onReset={reset} right={panelControlsOffset} />
+        <div className="absolute bottom-2 z-10" style={{ right: panelControlsOffset }}><ZoomPill /></div>
         <SidePanel
           agentPanelRequest={agentPanelRequest}
           width={panelWidth}

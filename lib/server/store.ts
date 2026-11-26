@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { databaseUrl, workspaceDatabase } from '../db/connection'
-import { accountCanvases, oauthAccounts, users } from '../db/schema'
+import { accountCanvases, mcpOAuthGrants, oauthAccounts, users } from '../db/schema'
 import { googleAuthConfigured, workspaceId, WORKSPACE_HEADER } from '../auth-access'
 import { AGENT_AWAY_MS, applyOp, deckFront, emptyBoard, upgradeSheetLabels, visibleFrames } from '../ops'
 import { addSamplePrototype, SAMPLE_ID, seedBoard } from '../seed'
@@ -162,6 +162,7 @@ export async function prepareStore(checkAccounts = false) {
     await db.select({ id: users.id }).from(users)
       .leftJoin(oauthAccounts, eq(oauthAccounts.userId, users.id))
       .leftJoin(accountCanvases, eq(accountCanvases.ownerId, users.id))
+      .leftJoin(mcpOAuthGrants, eq(mcpOAuthGrants.userId, users.id))
       .limit(1)
   }
   if (!connectionString) return

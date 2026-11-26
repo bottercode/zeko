@@ -66,7 +66,7 @@ Generate `AUTH_SECRET` with `openssl rand -base64 32`. Zeko requests the standar
 
 Google sign-in saves the user's profile and latest sign-in time in `zeko.users` and the Google account ID in `zeko.oauth_accounts`. OAuth access and refresh tokens stay out of PostgreSQL. Each user owns the canvases in `zeko.account_canvases`. The original private workspace uses `zeko.canvases`. The hosted database role needs SELECT, INSERT, and UPDATE on these tables.
 
-Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. After setup, Google users can copy a workspace-specific MCP credential from the **MCP** dialog. The previous Basic-auth MCP credentials continue to point to the original workspace, which remains available in a local installation connected to the same database. Embedded agent chat requires a local installation with an authenticated agent CLI.
+Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. Hosted MCP clients sign in through the browser with the same Google workspace. The hosted database role needs SELECT, INSERT, and DELETE on `zeko.mcp_oauth_grants`. Existing Basic-auth MCP credentials point to the original workspace.
 
 ## Agent chat
 
@@ -90,7 +90,9 @@ Use `zeko status` to check the connection and `zeko stop` to stop the companion.
 
 ## External MCP connection
 
-Use the **MCP** button to connect an external client. Zeko serves MCP over Streamable HTTP at `/api/mcp`. Add `?as=<name>` so the board knows who is working, and append `&board=<canvas-id>` to pin the connection to a canvas.
+Use the **MCP** button for the connection command and sign-in steps for your client. Hosted Zeko uses the same `/api/mcp` URL across canvases. Claude Code signs in through **/mcp → zeko → Authenticate**, and Codex supports `codex mcp login zeko`. Approve the connection in your browser, then open the canvas you want the client to work on.
+
+For local connections, add `?as=<name>` so the board knows who is working, and append `&board=<canvas-id>` to pin the connection to a canvas.
 
 ```bash
 claude mcp add --transport http zeko "http://localhost:4747/api/mcp?as=Claude"

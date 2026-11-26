@@ -94,13 +94,6 @@ export function useBoard(boardId: string) {
     syncHistory()
   }, [run])
 
-  const reset = useCallback(async () => {
-    undoStack.current = []
-    redoStack.current = []
-    syncHistory()
-    await fetch(`/api/board${q}`, { method: 'DELETE' })
-  }, [q])
-
   /** Loads an exported board. Returns an error message, or null when it worked. */
   const importBoard = useCallback(async (json: string): Promise<string | null> => {
     let body: unknown
@@ -117,7 +110,7 @@ export function useBoard(boardId: string) {
     return null
   }, [q])
 
-  return { board, dispatch, undo, redo, history, connection, reset, importBoard }
+  return { board, dispatch, undo, redo, history, connection, importBoard }
 }
 
 /** A clock that re-renders every few seconds, for "away" and "2m ago". */

@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { decode, getToken } from 'next-auth/jwt'
 import { NextResponse, type NextRequest } from 'next/server'
-import { ACP_DEVICE_HEADER, ACP_RUN_TOKEN_SALT, ACP_TOKEN_SALT, canvasReturnPath, googleAuthConfigured, MCP_TOKEN_SALT, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
+import { ACP_DEVICE_HEADER, ACP_RUN_TOKEN_SALT, ACP_TOKEN_SALT, canvasReturnPath, googleAuthConfigured, MCP_AGENT_HEADER, MCP_OAUTH_PATH, MCP_OAUTH_TOKEN_SALT, MCP_PATH, MCP_RESOURCE_METADATA, MCP_SERVER_METADATA, MCP_TOKEN_SALT, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
 
 function basicAuthorized(header: string | null) {
   const password = process.env.ZEKO_PREVIEW_PASSWORD
@@ -33,6 +33,7 @@ export async function proxy(request: NextRequest) {
   headers.delete('authorization')
   headers.delete(WORKSPACE_HEADER)
   headers.delete(ACP_DEVICE_HEADER)
+  headers.delete(MCP_AGENT_HEADER)
   const { pathname, search } = request.nextUrl
   const read = request.method === 'GET' || request.method === 'HEAD'
   if (pathname === '/api/health' && request.method === 'GET') return NextResponse.next({ request: { headers } })
@@ -43,9 +44,16 @@ export async function proxy(request: NextRequest) {
   }
 
   const publicOrigin = new URL(process.env.AUTH_URL!)
+  if (read && [MCP_RESOURCE_METADATA, MCP_SERVER_METADATA, '/.well-known/oauth-protected-resource'].includes(pathname)) {
+    return NextResponse.next({ request: { headers } })
+  }
   const origin = headers.get('origin')
   if (!read && origin && origin !== publicOrigin.origin) {
     return new NextResponse('Forbidden', { status: 403 })
+  }
+  if ((read && pathname === MCP_OAUTH_PATH + '/authorize') ||
+      (request.method === 'POST' && [MCP_OAUTH_PATH + '/register', MCP_OAUTH_PATH + '/token'].includes(pathname))) {
+    return NextResponse.next({ request: { headers } })
   }
   if (pathname === '/api/acp/pair' && request.method === 'POST') return NextResponse.next({ request: { headers } })
   if (pathname === '/api/acp/relay') {
@@ -55,17 +63,28 @@ export async function proxy(request: NextRequest) {
     headers.set(ACP_DEVICE_HEADER, token.device)
     return NextResponse.next({ request: { headers } })
   }
-  if (pathname === '/api/mcp' || pathname === '/api/agents/companion') {
+  if (pathname === MCP_PATH || pathname === '/api/agents/companion') {
     const auth = request.headers.get('authorization')
     if (pathname === '/api/mcp' && basicAuthorized(auth)) {
       headers.set(WORKSPACE_HEADER, 'legacy')
       return NextResponse.next({ request: { headers } })
     }
-    const run = pathname === '/api/mcp' && request.nextUrl.searchParams.has('run')
+    const run = pathname === MCP_PATH && request.nextUrl.searchParams.has('run')
+    if (pathname === MCP_PATH && !run) {
+      const oauth = await bearerToken(request, MCP_OAUTH_TOKEN_SALT)
+      if (oauth?.aud === publicOrigin.origin + MCP_PATH && workspaceId(oauth.workspace)) {
+        headers.set(WORKSPACE_HEADER, oauth.workspace)
+        if (typeof oauth.agent === 'string') headers.set(MCP_AGENT_HEADER, oauth.agent)
+        return NextResponse.next({ request: { headers } })
+      }
+    }
     const token = await bearerToken(request, run ? ACP_RUN_TOKEN_SALT : MCP_TOKEN_SALT)
     if (!workspaceId(token?.workspace)) {
-      return pathname === '/api/mcp'
-        ? basicChallenge()
+      return pathname === MCP_PATH
+        ? new NextResponse('Sign in to Zeko to connect.', { status: 401, headers: {
+          'WWW-Authenticate': `Bearer resource_metadata="${publicOrigin.origin}${MCP_RESOURCE_METADATA}", scope="mcp"`,
+          'Cache-Control': 'no-store',
+        } })
         : NextResponse.json({ error: 'Connect with a Zeko workspace token.' }, { status: 401 })
     }
     if (run && ['board', 'task', 'run', 'as'].some((field) => token[field] !== request.nextUrl.searchParams.get(field))) {

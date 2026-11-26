@@ -21,6 +21,19 @@ export const oauthAccounts = zeko.table('oauth_accounts', {
   unique().on(table.userId, table.provider),
 ])
 
+export const mcpOAuthGrants = zeko.table('mcp_oauth_grants', {
+  tokenHash: varchar('token_hash', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  clientHash: varchar('client_hash', { length: 64 }).notNull(),
+  kind: text({ enum: ['code', 'refresh'] }).notNull(),
+  redirectUri: text('redirect_uri'),
+  challenge: varchar({ length: 43 }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  index('mcp_oauth_grants_expiry_idx').on(table.expiresAt),
+  index('mcp_oauth_grants_user_idx').on(table.userId),
+])
+
 export const canvases = zeko.table('canvases', {
   id: varchar({ length: 40 }).primaryKey(),
   snapshot: jsonb().$type<Board>().notNull(),

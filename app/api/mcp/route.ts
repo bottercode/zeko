@@ -5,11 +5,11 @@ import { boardPages, deckMembers, designGuidelines, framePage, frameSourceUrl, p
 import { defaultDesign, withDesignTokens } from '@/lib/tokens'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import * as store from '@/lib/server/store'
-import { canvasOf } from '@/lib/server/canvas'
 import type { Actor, Board, Frame, Task } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { inspect, screenshot } from '@/lib/server/render'
 import { editLayers, inspectLayers, layerRevision } from '@/lib/server/layers'
+import { MCP_AGENT_HEADER } from '@/lib/auth-access'
 
 const INSTRUCTIONS = `Zeko is a light table for a product's screens. Each frame is a sketch: a whole HTML
 document you write, labelled with the route and state it stands for.
@@ -51,11 +51,16 @@ interface CanvasScope {
 
 const canvas = new AsyncLocalStorage<CanvasScope>()
 const here = () => canvas.getStore()?.id ?? store.resolveId()
-const getBoard = () => store.getBoard(here())
+function requireCanvas() {
+  const id = here()
+  if (!id) throw new Error('Create or open a canvas in Zeko first.')
+  return id
+}
+const getBoard = () => store.getBoard(requireCanvas())
 const dispatch = (op: Parameters<typeof store.dispatch>[1], actor: Actor) => {
   const scope = canvas.getStore()
   if (scope && op.type !== 'agent.status' && op.type !== 'agent.connect') scope.dirty = true
-  return store.dispatch(here(), op, actor)
+  return store.dispatch(requireCanvas(), op, actor)
 }
 
 function canHandleTask(task: Task) {
@@ -71,7 +76,7 @@ function publicTask({ localRun: _localRun, thinking: _thinking, tools: _tools, .
 function agentFrom(req: Request | undefined): Actor {
   let name = 'Agent'
   if (req) {
-    const as = new URL(req.url).searchParams.get('as')
+    const as = new URL(req.url).searchParams.get('as') ?? req.headers.get(MCP_AGENT_HEADER)
     if (as) name = as.slice(0, 40)
   }
   return { kind: 'agent', name }
@@ -186,7 +191,7 @@ const handler = createMcpHandler(
       },
       async () =>
         text({
-          workingOn: here(),
+          workingOn: here() || null,
           canvases: store.listBoards().map(({ id, name, frames, openTasks, updatedAt }) => ({ id, name, frames, openTasks, updatedAt: new Date(updatedAt).toISOString() })),
         }),
     )
@@ -660,14 +665,17 @@ async function acceptedRequest(response: Response, id: string | number) {
 }
 
 async function route(request: Request) {
-  const id = await canvasOf(request)
-  if (!id) return Response.json({ error: 'No such canvas. Leave out ?board= to work on the canvas the person has open.' }, { status: 404 })
-  const scope: CanvasScope = { id }
   const params = new URL(request.url).searchParams
+  await store.prepareStore()
+  const boardId = params.get('board')
+  const empty = store.personalWorkspace() && store.listBoards().length === 0
+  const id = boardId ? store.hasBoard(boardId) ? boardId : null : empty ? '' : store.resolveId()
+  if (id === null) return Response.json({ error: 'No such canvas. Leave out ?board= to work on the canvas the person has open.' }, { status: 404 })
+  const scope: CanvasScope = { id }
   if (params.has('run')) {
     const taskId = params.get('task')
     const runId = params.get('run')
-    const task = store.getBoard(id).tasks.find((item) => item.id === taskId)
+    const task = id ? store.getBoard(id).tasks.find((item) => item.id === taskId) : undefined
     if (!taskId || !runId || task?.status === 'done' || task?.localRun?.id !== runId || task.localRun.error || task.assignee !== agentFrom(request).name) {
       return Response.json({ error: 'This Zeko run is unavailable.' }, { status: 409 })
     }
