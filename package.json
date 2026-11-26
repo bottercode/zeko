@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:import-local": "tsx scripts/import-local-canvases.ts",
     "lint": "eslint",
+    "test": "node --conditions=react-server --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

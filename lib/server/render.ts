@@ -28,19 +28,18 @@ function chromePath() {
 const g = globalThis as typeof globalThis & { __zekoBrowser?: Promise<Browser> }
 
 async function browser(): Promise<Browser> {
-  const existing = g.__zekoBrowser
-  if (existing) {
-    const b = await existing.catch(() => null)
-    if (b?.connected) return b
-  }
-  g.__zekoBrowser = puppeteer.launch({
+  if (g.__zekoBrowser) return g.__zekoBrowser
+  const launch = puppeteer.launch({
     executablePath: chromePath(),
     headless: true,
     pipe: true,
     env: process.env.ZEKO_HOSTED === '1' ? { PATH: process.env.PATH, HOME: process.env.HOME } : undefined,
     args: ['--no-first-run', '--no-default-browser-check', '--disable-extensions', '--hide-scrollbars', '--mute-audio'],
   })
-  return g.__zekoBrowser
+  g.__zekoBrowser = launch
+  const forget = () => { if (g.__zekoBrowser === launch) delete g.__zekoBrowser }
+  void launch.then((instance) => instance.once('disconnected', forget), forget)
+  return launch
 }
 
 export async function withSketchPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
@@ -68,7 +67,10 @@ async function withPage<T>(html: string, width: number, height: number, scale: n
     await page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: scale })
     // Sketches are the agent's own HTML; give fonts and images a moment, but never hang on them.
     await page.setContent(html, { waitUntil: 'load', timeout: 8000 }).catch(() => undefined)
-    await page.evaluate(() => document.fonts?.ready).catch(() => undefined)
+    await page.evaluate(() => Promise.race([
+      document.fonts.ready,
+      new Promise((resolve) => window.setTimeout(resolve, 1200)),
+    ])).catch(() => undefined)
     return fn(page)
   })
 }

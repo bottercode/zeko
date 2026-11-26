@@ -185,8 +185,7 @@ async function runAgent(
       dispatch(boardId, { type: 'task.run.close', id: taskId, runId }, actor)
       return
     }
-    const failedTool = [...tools.values()].some((tool) => tool.status === 'failed')
-    if (!errorMessage && stopReason === 'end_turn' && reply.trim() && !failedTool) {
+    if (!errorMessage && stopReason === 'end_turn' && reply.trim()) {
       dispatch(boardId, { type: 'task.complete', id: taskId, resultFrameIds: [] }, actor)
       dispatch(boardId, { type: 'task.run.close', id: taskId, runId }, actor)
       return

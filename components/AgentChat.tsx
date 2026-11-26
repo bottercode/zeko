@@ -1,9 +1,7 @@
 'use client'
 
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, lazy, Suspense, useRef, useState } from 'react'
 import { ArrowUpRight, Brain, ChevronDown, CircleAlert, CodeXml, Frame as FrameIcon, History, MessageSquarePlus, Play, Sparkles, Wrench } from 'lucide-react'
-import { code } from '@streamdown/code'
-import { defaultRehypePlugins, Streamdown } from 'streamdown'
 import { ago, newId } from '@/lib/client/useBoard'
 import { DEFAULT_CHAT_ID, localAgentProvider, taskResultFrames } from '@/lib/ops'
 import type { Task } from '@/lib/types'
@@ -24,13 +22,7 @@ import {
 } from './ui/message-scroller'
 import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle } from './ui/trace'
 
-const markdownPlugins = { code }
-const safeMarkdown = [defaultRehypePlugins.sanitize]
-const markdownControls = { code: { copy: true, download: false }, table: false }
-const chatLink = (url: string) => {
-  if (!/^https?:\/\//i.test(url)) return undefined
-  try { return new URL(url).href } catch { return undefined }
-}
+const AgentMarkdown = lazy(() => import('./AgentMarkdown').then(({ AgentMarkdown }) => ({ default: AgentMarkdown })))
 
 export function AgentChat() {
   const { board, now } = useStudio()
@@ -214,19 +206,9 @@ function AgentMessage({ task }: { task: Task }) {
         {reply && (
           <Bubble variant="ghost" className="w-full">
             <BubbleContent className="w-full wrap-anywhere">
-              <Streamdown
-                className="min-w-0 space-y-2 [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_p]:whitespace-pre-wrap"
-                plugins={markdownPlugins}
-                rehypePlugins={safeMarkdown}
-                disallowedElements={['img']}
-                skipHtml
-                urlTransform={chatLink}
-                controls={markdownControls}
-                lineNumbers={false}
-                codeBlockMaxHeight={320}
-                mode={streaming ? 'streaming' : 'static'}
-                isAnimating={streaming}
-              >{reply}</Streamdown>
+              <Suspense fallback={<p className="whitespace-pre-wrap">{reply}</p>}>
+                <AgentMarkdown reply={reply} streaming={streaming} />
+              </Suspense>
             </BubbleContent>
           </Bubble>
         )}

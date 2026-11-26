@@ -8,6 +8,7 @@ import { returnToSignIn } from './sign-in'
 export const ME: Actor = { kind: 'human', name: 'You' }
 
 export type Connection = 'connecting' | 'live' | 'offline' | 'missing'
+export type SaveState = 'idle' | 'saving' | 'failed'
 
 /**
  * The board, kept live over server-sent events. Changes apply here at once
@@ -17,7 +18,13 @@ export function useBoard(boardId: string) {
   const q = `?board=${encodeURIComponent(boardId)}`
   const [board, setBoard] = useState<Board | null>(null)
   const [connection, setConnection] = useState<Connection>('connecting')
+  const [saveState, setSaveState] = useState<SaveState>('idle')
   const current = useRef<Board | null>(null)
+  const server = useRef<Board | null>(null)
+  const pending = useRef(0)
+  const saveFailed = useRef(false)
+  const committedVersion = useRef(0)
+  const writes = useRef(Promise.resolve())
   const undoStack = useRef<Op[]>([])
   const redoStack = useRef<Op[]>([])
   const [history, setHistory] = useState({ canUndo: false, canRedo: false })
@@ -30,27 +37,50 @@ export function useBoard(boardId: string) {
 
   useEffect(() => {
     const source = new EventSource(`/api/events${q}`)
-    source.onopen = () => setConnection('live')
-    source.onerror = () => {
-      // An unknown canvas answers 404, which the browser reports only as an error. Ask once to tell them apart.
-      void fetch(`/api/board${q}`)
+    let request: AbortController | undefined
+    let received = false
+    const recover = () => {
+      if (request) return
+      const abort = new AbortController()
+      request = abort
+      void fetch(`/api/board${q}`, { signal: abort.signal })
         .then(async (r) => {
           if (await returnToSignIn(r)) {
             source.close()
             return
           }
+          if (abort.signal.aborted) return
           if (r.status === 404) {
             source.close()
             setConnection('missing')
-          } else setConnection('offline')
+          } else {
+            if (r.ok && !current.current) {
+              const snapshot = await r.json() as Board
+              if (!abort.signal.aborted && !current.current) show(snapshot)
+            }
+            if (!abort.signal.aborted) setConnection('offline')
+          }
         })
-        .catch(() => setConnection('offline'))
+        .catch(() => { if (!abort.signal.aborted) setConnection('offline') })
+        .finally(() => { if (request === abort) request = undefined })
     }
+    source.onerror = recover
+    const fallback = setTimeout(() => { if (!received) recover() }, 800)
     source.onmessage = (event) => {
-      show(JSON.parse(event.data) as Board)
-      setConnection('live')
+      try {
+        const snapshot = JSON.parse(event.data) as Board
+        received = true
+        request?.abort()
+        server.current = snapshot
+        if (!pending.current && snapshot.version >= committedVersion.current) show(snapshot)
+        setConnection('live')
+      } catch { recover() }
     }
-    return () => source.close()
+    return () => {
+      clearTimeout(fallback)
+      request?.abort()
+      source.close()
+    }
   }, [show, q])
 
   /** Applies an op here at once, records how to take it back, and sends it to the server. */
@@ -70,14 +100,29 @@ export function useBoard(boardId: string) {
         syncHistory()
       }
       show(after)
-      void fetch(`/api/board${q}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(op),
-      }).then(async (response) => {
-        if (await returnToSignIn(response)) return
-        if (!response.ok) setConnection('offline')
-      }).catch(() => setConnection('offline'))
+      pending.current++
+      setSaveState('saving')
+      // Keep gestures and text edits in the order the person made them.
+      writes.current = writes.current.then(async () => {
+        try {
+          const response = await fetch(`/api/board${q}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(op),
+          })
+          if (await returnToSignIn(response)) return
+          if (!response.ok) throw new Error('Could not save the canvas change.')
+          const { version } = await response.json() as { version: number }
+          committedVersion.current = Math.max(committedVersion.current, version)
+        } catch {
+          saveFailed.current = true
+        } finally {
+          if (--pending.current === 0) {
+            if (server.current && server.current.version >= committedVersion.current) show(server.current)
+            setSaveState(saveFailed.current ? 'failed' : 'idle')
+          }
+        }
+      })
     },
     [show, q],
   )
@@ -102,15 +147,22 @@ export function useBoard(boardId: string) {
     } catch {
       return 'That file isn’t valid JSON.'
     }
-    const res = await fetch(`/api/board${q}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    await writes.current
+    const res = await fetch(`/api/board${q}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null)
+    if (!res) return 'Couldn’t reach Zeko to import the canvas. Try again.'
+    if (await returnToSignIn(res)) return 'Sign in to import this canvas.'
     if (!res.ok) return ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? 'Couldn’t import that board.'
+    const snapshot = await fetch(`/api/board${q}`).then((response) => response.ok ? response.json() as Promise<Board> : undefined).catch(() => undefined)
+    if (snapshot && (!server.current || snapshot.version >= server.current.version)) show(snapshot)
+    saveFailed.current = false
+    setSaveState('idle')
     undoStack.current = []
     redoStack.current = []
     syncHistory()
     return null
-  }, [q])
+  }, [q, show])
 
-  return { board, dispatch, undo, redo, history, connection, importBoard }
+  return { board, dispatch, undo, redo, history, connection, saveState, importBoard }
 }
 
 /** A clock that re-renders every few seconds, for "away" and "2m ago". */

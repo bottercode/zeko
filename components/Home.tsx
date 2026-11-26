@@ -36,7 +36,7 @@ import { Field, FieldGroup, FieldLabel } from './ui/field'
 import { Input } from './ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from './ui/input-group'
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
-import { Mark } from './TopBar'
+import { Mark } from './Mark'
 import { AcpAgentPicker, useAcpAgents } from './AcpComposerOptions'
 import { ConfirmDialog, Menu, Tip, ToastProvider, cx, useToast, type MenuItem } from './kit'
 
@@ -102,39 +102,72 @@ function HomeInner({ account }: { account?: ReactNode }) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
   const filterRef = useRef<HTMLInputElement>(null)
+  const listRequest = useRef<AbortController>(null)
+  const needsReload = useRef(false)
 
   const load = async () => {
+    listRequest.current?.abort()
+    const request = new AbortController()
+    listRequest.current = request
     try {
-      const res = await fetch('/api/boards', { cache: 'no-store' })
+      const res = await fetch('/api/boards', { cache: 'no-store', signal: request.signal })
       if (await returnToSignIn(res)) return
       if (!res.ok) throw new Error('Could not load canvases')
       const data = (await res.json()) as { canvases: Canvas[]; hosted?: boolean; started?: boolean }
+      if (request.signal.aborted) return
       setCanvases(data.canvases)
       setHosted(data.hosted === true)
       setStarted(data.started ?? data.canvases.length > 0)
+      needsReload.current = false
       setOffline(false)
     } catch {
-      setOffline(true)
+      if (!request.signal.aborted) {
+        needsReload.current = true
+        setOffline(true)
+      }
+    } finally {
+      if (listRequest.current === request) listRequest.current = null
     }
   }
   const loadRef = useRef(load)
   useEffect(() => {
     loadRef.current = load
   })
-  // Refresh canvas summaries. Agent presence arrives separately as it changes.
   useEffect(() => {
-    const first = setTimeout(() => void loadRef.current(), 0)
-    const id = setInterval(() => void loadRef.current(), 5000)
-    return () => {
-      clearTimeout(first)
-      clearInterval(id)
+    const source = new EventSource('/api/boards/events?canvases=1')
+    let revision: number | undefined
+    let live = false
+    let refresh: ReturnType<typeof setTimeout> | undefined
+    const loadVisible = () => {
+      if (document.hidden || refresh) return
+      refresh = setTimeout(() => {
+        refresh = undefined
+        void loadRef.current()
+      }, 120)
     }
-  }, [])
-
-  useEffect(() => {
-    const source = new EventSource('/api/boards/events')
-    source.onmessage = (event) => setPresence(JSON.parse(event.data) as SeenAgent[])
-    return () => source.close()
+    source.onopen = () => { revision = undefined }
+    source.onerror = () => { live = false; loadVisible() }
+    source.onmessage = (event) => {
+      const snapshot = JSON.parse(event.data) as { agents?: SeenAgent[]; revision?: number }
+      if (!Array.isArray(snapshot.agents) || typeof snapshot.revision !== 'number') return
+      live = true
+      setPresence(snapshot.agents)
+      if (revision !== snapshot.revision) {
+        revision = snapshot.revision
+        loadVisible()
+      }
+    }
+    const first = setTimeout(() => { if (!live) loadVisible() }, 1000)
+    const fallback = setInterval(() => { if (!live || needsReload.current) loadVisible() }, 15_000)
+    document.addEventListener('visibilitychange', loadVisible)
+    return () => {
+      source.close()
+      clearTimeout(first)
+      clearTimeout(refresh)
+      clearInterval(fallback)
+      document.removeEventListener('visibilitychange', loadVisible)
+      listRequest.current?.abort()
+    }
   }, [])
 
   const create = async (body: Record<string, unknown>, welcome = body.sample === 'open' ? 'sample' : '') => {
@@ -171,7 +204,12 @@ function HomeInner({ account }: { account?: ReactNode }) {
     setRenaming(null)
     if (!name.trim() || name.trim() === c.name) return
     setCanvases((list) => list?.map((x) => (x.id === c.id ? { ...x, name: name.trim() } : x)) ?? null)
-    await fetch(`/api/boards/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    const response = await fetch(`/api/boards/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).catch(() => null)
+    if (response && await returnToSignIn(response)) return
+    if (!response?.ok) {
+      setCanvases((list) => list?.map((x) => x.id === c.id && x.name === name.trim() ? { ...x, name: c.name } : x) ?? null)
+      toast('Couldn’t rename the canvas. Try again.')
+    }
     void load()
   }
 
@@ -186,7 +224,12 @@ function HomeInner({ account }: { account?: ReactNode }) {
           label: 'Duplicate',
           icon: <Copy size={14} />,
           onSelect: async () => {
-            await fetch(`/api/boards/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duplicate: true }) })
+            const response = await fetch(`/api/boards/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duplicate: true }) }).catch(() => null)
+            if (response && await returnToSignIn(response)) return
+            if (!response?.ok) {
+              toast('Couldn’t duplicate the canvas. Try again.')
+              return
+            }
             toast(`Duplicated ${c.name}`)
             void load()
           },
@@ -401,15 +444,15 @@ function HomeInner({ account }: { account?: ReactNode }) {
             </ul>
           ) : (
             <div className="overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--color-hair)]">
-              <div className="grid grid-cols-[1fr_90px_120px_120px_40px] items-center border-b border-hair-soft px-4 py-2 text-2xs text-mist">
+              <div className="grid grid-cols-[minmax(0,1fr)_64px_32px] items-center border-b border-hair-soft px-4 py-2 text-2xs text-mist sm:grid-cols-[minmax(0,1fr)_70px_88px_88px_32px]">
                 <span>Name</span>
                 <span>Frames</span>
-                <span>Requests</span>
-                <span>Edited</span>
+                <span className="hidden sm:block">Requests</span>
+                <span className="hidden sm:block">Edited</span>
                 <span />
               </div>
               {shown.map((c) => (
-                <div key={c.id} className="group grid grid-cols-[1fr_90px_120px_120px_40px] items-center border-b border-hair-soft px-4 last:border-0 hover:bg-white/[0.02]">
+                <div key={c.id} className="group grid grid-cols-[minmax(0,1fr)_64px_32px] items-center border-b border-hair-soft px-4 last:border-0 hover:bg-white/[0.02] sm:grid-cols-[minmax(0,1fr)_70px_88px_88px_32px]">
                   {renaming === c.id ? (
                     <RenameInput initial={c.name} onDone={(n) => void rename(c, n)} />
                   ) : (
@@ -418,15 +461,15 @@ function HomeInner({ account }: { account?: ReactNode }) {
                     </Link>
                   )}
                   <span className="text-sm text-slate tabular-nums">{c.frames}</span>
-                  <span className="text-sm text-slate">{c.openTasks ? `${c.openTasks} waiting` : '–'}</span>
-                  <span className="text-sm text-slate">{now ? ago(c.updatedAt, now) : ''}</span>
+                  <span className="hidden text-sm text-slate sm:block">{c.openTasks ? `${c.openTasks} waiting` : '–'}</span>
+                  <span className="hidden text-sm text-slate sm:block">{now ? ago(c.updatedAt, now) : ''}</span>
                   <button
                     aria-label={`More for ${c.name}`}
                     onClick={(e) => {
                       const r = e.currentTarget.getBoundingClientRect()
                       cardMenu(c, r.right - 200, r.bottom + 4)
                     }}
-                    className="grid size-7 place-items-center rounded-md text-mist opacity-0 group-hover:opacity-100 hover:bg-wash hover:text-ink focus:opacity-100"
+                    className="grid size-7 place-items-center rounded-md text-mist hover:bg-wash hover:text-ink [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
                   >
                     <MoreHorizontal size={15} />
                   </button>
@@ -660,7 +703,7 @@ function Card({ c, now, renaming, onRename, onMenu }: { c: Canvas; now: number; 
             const r = e.currentTarget.getBoundingClientRect()
             onMenu(r.right - 200, r.bottom + 4)
           }}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-mist opacity-0 group-hover:opacity-100 hover:bg-wash hover:text-ink focus:opacity-100"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-mist hover:bg-wash hover:text-ink [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
         >
           <MoreHorizontal size={15} />
         </button>

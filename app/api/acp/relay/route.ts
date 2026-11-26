@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const agents = (new URL(request.url).searchParams.get('agents') ?? '').split(',')
     .filter((agent): agent is 'claude' | 'codex' => agent === 'claude' || agent === 'codex')
   return eventStream<RelayCommand>(request.signal, () => ({ type: 'ready' }),
-    (send) => registerAcpDevice(caller.workspace, caller.device, agents, send))
+    (send) => registerAcpDevice(caller.workspace, caller.device, agents, send), 'ordered')
 }
 
 export async function POST(request: Request) {

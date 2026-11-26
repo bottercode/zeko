@@ -36,18 +36,13 @@ function optionsFor(selection: AcpSelection, refresh = false): Promise<AcpCapabi
   return entry.pending
 }
 
-export const GET = withWorkspace(async (request: Request) => {
+export const GET = withWorkspace(async () => {
   await connection()
   const agents = listAcpAgents()
   const catalog = Object.fromEntries(agents.flatMap(({ id }) => {
     const entry = cache.get(keyOf(base(id)))
     return entry?.data ? [[id, entry.data.options]] : []
   }))
-  if (request.headers.get('sec-fetch-site') !== 'cross-site') {
-    for (const agent of agents) {
-      if (agent.available && (agent.id === 'codex' || agent.id === 'claude')) void optionsFor(base(agent.id)).catch(() => {})
-    }
-  }
   return Response.json({ agents, catalog })
 })
 

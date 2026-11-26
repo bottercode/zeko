@@ -5,7 +5,7 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { imageAccept, isBoardImage } from '@/lib/client/images'
 import { Check, CloudOff, Columns2, Download, Ellipsis, LayoutGrid, Link2, LoaderCircle, Play, Plug, Redo2, Search, Undo2, Upload, type LucideIcon } from 'lucide-react'
 import { agentIsOnline } from '@/lib/ops'
-import type { Connection } from '@/lib/client/useBoard'
+import type { Connection, SaveState } from '@/lib/client/useBoard'
 import type { AgentPresence } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { AgentAvatar } from './AgentAvatar'
@@ -17,15 +17,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
 
-export function Mark({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden>
-      <rect x="1" y="3.5" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" strokeOpacity=".55" strokeWidth="1.5" transform="rotate(-6 7 9)" />
-      <rect x="5" y="3.5" width="12" height="11" rx="1.5" fill="var(--color-lightbox)" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="13.6" cy="7" r="1.7" fill="var(--color-grease)" />
-    </svg>
-  )
-}
+import { Mark } from './Mark'
 
 function useReachable(url: string) {
   const [state, setState] = useState<'checking' | 'up' | 'down'>('checking')
@@ -50,8 +42,8 @@ function useReachable(url: string) {
   return state
 }
 
-export function TopBar({ connection, onImport, placeImages, connectOpen, onConnectOpenChange }: {
-  connection: Connection; onImport: (json: string) => Promise<string | null>; placeImages: (files: File[]) => Promise<void>;
+export function TopBar({ connection, saveState, onImport, placeImages, connectOpen, onConnectOpenChange }: {
+  connection: Connection; saveState: SaveState; onImport: (json: string) => Promise<string | null>; placeImages: (files: File[]) => Promise<void>;
   connectOpen: boolean; onConnectOpenChange: (open: boolean) => void
 }) {
   const { boardId, board, pageId, dispatch, selection, openLoupe, openSearch, confirm, toast, fit, undo, redo, history, now, play } = useStudio()
@@ -100,8 +92,12 @@ export function TopBar({ connection, onImport, placeImages, connectOpen, onConne
   }
 
   const share = async () => {
-    await navigator.clipboard.writeText(window.location.href).catch(() => undefined)
-    toast('Link copied. It opens on this computer, or on others that can reach this address')
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      toast('Canvas link copied')
+    } catch {
+      toast('Couldn’t copy the link. Copy it from your address bar instead.')
+    }
   }
   const canvasActions: { label: string; hint: string; Icon: LucideIcon; run: () => void; accessibleLabel?: string; disabled?: boolean; keys?: string[] }[][] = [
     [
@@ -129,7 +125,7 @@ export function TopBar({ connection, onImport, placeImages, connectOpen, onConne
           </Link>
         </Tip>
         <CanvasName key={boardId} name={board.name} onRename={(name) => dispatch({ type: 'board.update', name })} />
-        <CanvasConnection connection={connection} />
+        <CanvasConnection connection={connection} saveState={saveState} />
         <Separator orientation="vertical" className="editor-divider mx-0.5 h-4 data-vertical:self-center" />
         <div role="group" aria-label="Canvas actions" className="flex shrink-0 items-center">
           <IconButton label="Undo" keys={['⌘', 'Z']} disabled={!history.canUndo} onClick={undo}>
@@ -282,16 +278,18 @@ function CanvasName({ name, onRename }: { name: string; onRename: (name: string)
   )
 }
 
-function CanvasConnection({ connection }: { connection: Connection }) {
-  const live = connection === 'live'
-  const connecting = connection === 'connecting'
-  const label = live ? 'Canvas connected' : connecting ? 'Connecting to canvas' : 'Reconnecting to canvas'
-  const Icon = live ? Check : connecting ? LoaderCircle : CloudOff
+function CanvasConnection({ connection, saveState }: { connection: Connection; saveState: SaveState }) {
+  const failed = saveState === 'failed'
+  const live = connection === 'live' && saveState === 'idle'
+  const loading = saveState === 'saving' || connection === 'connecting'
+  const label = failed ? 'A canvas change couldn’t be saved' : saveState === 'saving' ? 'Saving canvas…'
+    : live ? 'Canvas connected' : loading ? 'Connecting to canvas…' : 'Reconnecting to canvas…'
+  const Icon = failed ? CloudOff : live ? Check : loading ? LoaderCircle : CloudOff
 
   return (
     <Tip label={label}>
-      <span role="status" className={cx('grid size-5 shrink-0 place-items-center', live || connecting ? 'text-slate' : 'text-grease')}>
-        <Icon aria-hidden size={13} strokeWidth={1.75} className={connecting ? 'motion-safe:animate-spin' : undefined} />
+      <span role="status" className={cx('grid size-5 shrink-0 place-items-center', !failed && (live || loading) ? 'text-slate' : 'text-grease')}>
+        <Icon aria-hidden size={13} strokeWidth={1.75} className={!failed && loading ? 'motion-safe:animate-spin' : undefined} />
         <span className="sr-only">{label}</span>
       </span>
     </Tip>

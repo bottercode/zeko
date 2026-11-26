@@ -27,7 +27,12 @@ const proxy = createServer((incoming, response) => {
   }
   headers['x-zeko-preview-gateway'] = gatewayToken
   const upstream = upstreamRequest({ hostname: '127.0.0.1', port: internalPort, path: url, method, headers }, (result) => {
-    response.writeHead(result.statusCode ?? 502, { ...result.headers, 'Cache-Control': 'private, no-store, no-transform' })
+    const headers = { ...result.headers }
+    const immutable = url?.startsWith('/_next/static/') &&
+      (result.statusCode === 200 || result.statusCode === 304) &&
+      headers['cache-control']?.includes('immutable') && !headers['set-cookie']
+    if (!immutable) headers['cache-control'] = 'private, no-store, no-transform'
+    response.writeHead(result.statusCode ?? 502, headers)
     result.pipe(response)
   })
   upstream.on('error', () => {

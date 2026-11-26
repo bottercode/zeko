@@ -38,6 +38,7 @@ export function CanvasPreview({ cover, className }: { cover: CanvasCover | null;
           aria-hidden
           tabIndex={-1}
           sandbox=""
+          loading="lazy"
           srcDoc={cover.html}
           className="pointer-events-none absolute top-0 left-0 origin-top-left border-0"
           style={{ width: cover.w, height: cover.h, transform: `scale(${width / cover.w})` }}

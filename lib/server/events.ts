@@ -4,6 +4,7 @@ export function eventStream<T>(
   signal: AbortSignal,
   read: () => T,
   subscribe: (listener: (snapshot: T) => void) => () => void,
+  delivery: 'snapshot' | 'ordered' = 'snapshot',
 ) {
   const encoder = new TextEncoder()
   let cleanup = () => {}
@@ -20,14 +21,19 @@ export function eventStream<T>(
       let latest: { snapshot: T } | undefined = { snapshot: read() }
       const writable = () => !closed && (controller.desiredSize ?? 0) > 0
       const push = (text: string) => controller.enqueue(encoder.encode(text))
+      const write = (snapshot: T) => push(`data: ${JSON.stringify(snapshot)}\n\n`)
       flush = () => {
         if (!latest || !writable()) return
         const { snapshot } = latest
         latest = undefined
-        push(`data: ${JSON.stringify(snapshot)}\n\n`)
+        write(snapshot)
       }
       const send = (snapshot: T) => {
         if (closed) return
+        if (delivery === 'ordered') {
+          write(snapshot)
+          return
+        }
         // Consumers render the latest complete state. Keep one pending snapshot during bursts.
         latest = { snapshot }
         if (scheduled) return
@@ -37,6 +43,7 @@ export function eventStream<T>(
           flush()
         })
       }
+      if (delivery === 'ordered') flush()
       const unsubscribe = subscribe(send)
       const heartbeat = setInterval(() => {
         if (latest) flush()

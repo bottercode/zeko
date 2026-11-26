@@ -18,7 +18,8 @@ import { ShortcutsDialog } from './Shortcuts'
 import { DesignPanel, SidePanel } from './SidePanel'
 import { SketchCodeDialog } from './SketchCodeDialog'
 import { WebsiteDialog } from './WebsiteDialog'
-import { Mark, TopBar } from './TopBar'
+import { Mark } from './Mark'
+import { TopBar } from './TopBar'
 import { ConfirmDialog, Menu, ToastProvider, useToast, type MenuItem } from './kit'
 import { useFrameActions } from './actions'
 import { CHROME, LEFT_PANEL_WIDTH, SIDE_PANEL, StudioContext, useStudio, type Box, type Camera, type Draft, type StudioState, type Tool } from './studio-context'
@@ -71,7 +72,7 @@ interface ConfirmState {
 }
 
 function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
-  const { board, dispatch, undo, redo, history, connection, importBoard } = useBoard(boardId)
+  const { board, dispatch, undo, redo, history, connection, saveState, importBoard } = useBoard(boardId)
   const now = useNow()
   const toast = useToast()
   const stageRef = useRef<HTMLDivElement>(null)
@@ -534,7 +535,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
     return (
       <div className="grid h-full place-items-center">
         <div className="flex flex-col items-center gap-3 text-slate">
-          <span className={connection === 'offline' || connection === 'missing' ? '' : 'animate-pulse'}>
+          <span className={connection === 'offline' || connection === 'missing' ? '' : 'motion-safe:animate-pulse'}>
             <Mark size={28} />
           </span>
           {connection === 'missing' ? (
@@ -547,10 +548,10 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
           ) : connection === 'offline' ? (
             <>
               Couldn’t open this canvas.
-              <button className="text-ink underline underline-offset-4" onClick={() => window.location.reload()}>Try again</button>
+              <button type="button" className="text-ink underline underline-offset-4" onClick={() => window.location.reload()}>Try again</button>
             </>
           ) : (
-            'Opening the canvas…'
+            <span role="status">Opening the canvas…</span>
           )}
         </div>
       </div>
@@ -562,7 +563,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       <Keys loupe={loupe} setLoupe={setLoupe} overlayOpen={overlayOpen} toggleShortcuts={() => setShortcutsOpen((o) => !o)} />
       <div className="studio relative h-full overflow-hidden">
         <Canvas leftInset={leftInset} rightInset={rightInset} railLeft={railLeft} onShowLayers={leftClosed ? () => setLeftClosed(false) : undefined} />
-        <TopBar connection={connection} onImport={importBoard} placeImages={placeImages}
+        <TopBar connection={connection} saveState={saveState} onImport={importBoard} placeImages={placeImages}
           connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} />
         <LeftPanel closed={leftClosed} onClose={() => setLeftClosed(true)} />
         {sampleGuide && <GettingStarted left={railLeft} />}

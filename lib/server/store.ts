@@ -28,6 +28,8 @@ interface StoreState {
   entries: Map<string, Entry>
   ownerId?: string
   agentListeners: Set<(agents: SeenAgent[]) => void>
+  canvasListRevision: number
+  canvasListListeners: Set<() => void>
   companions: Map<string, { connectedAt: number; clients: number }>
   /** the canvas someone opened last; agents that don't name a canvas work here */
   lastOpened?: string
@@ -124,7 +126,7 @@ function storeFor(ownerId?: string) {
     const initial = connectionString || ownerId
       ? { entries: new Map<string, Entry>(), lastOpened: ownerId ? undefined : readLastOpened() }
       : load()
-    store = { ...initial, ownerId, companions: new Map(), agentListeners: new Set() }
+    store = { ...initial, ownerId, companions: new Map(), agentListeners: new Set(), canvasListRevision: 0, canvasListListeners: new Set() }
     stores.set(key, store)
   }
   return store
@@ -179,11 +181,16 @@ export async function prepareStore(checkAccounts = false) {
 }
 
 export async function flushCanvas(id: string) {
+  const store = state()
   try {
-    await state().database?.flush(id)
+    if (store.database) await store.database.flush(id)
+    else {
+      const entry = store.entries.get(id)
+      if (entry?.saveTimer) writeLocalCanvas(id, entry)
+    }
   } catch (error) {
     if (error instanceof CanvasWriteConflict) throw error
-    throw new Error('Could not confirm the canvas save in PostgreSQL. Zeko will retry.')
+    throw new Error('Could not confirm the canvas save.')
   }
 }
 
@@ -244,15 +251,41 @@ function persist(id: string) {
     return
   }
   clearTimeout(entry.saveTimer)
-  entry.saveTimer = setTimeout(() => writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(entry.board)), 250)
+  entry.saveTimer = setTimeout(() => {
+    try { writeLocalCanvas(id, entry) }
+    catch { entry.saveTimer = undefined; console.error('Zeko could not save a local canvas.') }
+  }, 250)
 }
 
-function publish(id: string) {
+function writeLocalCanvas(id: string, entry: Entry) {
+  writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(entry.board))
+  clearTimeout(entry.saveTimer)
+  entry.saveTimer = undefined
+}
+
+function publish(id: string, listChanged = true) {
   const entry = state().entries.get(id)!
   persist(id)
+  if (listChanged) publishCanvasList()
   if (!entry.listeners.size) return
   const snapshot = withCompanions(entry.board)
   for (const listener of entry.listeners) listener(snapshot)
+}
+
+function publishCanvasList() {
+  const store = state()
+  store.canvasListRevision = (store.canvasListRevision ?? 0) + 1
+  store.canvasListListeners?.forEach((listener) => listener())
+}
+
+export function canvasListRevision() {
+  return state().canvasListRevision ?? 0
+}
+
+export function subscribeCanvasList(listener: () => void) {
+  const listeners = (state().canvasListListeners ??= new Set())
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
 }
 
 /** The canvas a request means: the one it names, else the one opened last, else the one edited last. */
@@ -318,7 +351,7 @@ export function dispatch(id: string, op: Op, actor: Actor): Board {
   const entry = state().entries.get(id)!
   const next = applyOp(entry.board, op, actor)
   entry.board = QUIET_OPS.has(op.type) ? next : { ...next, updatedAt: Date.now() }
-  publish(id)
+  publish(id, !QUIET_OPS.has(op.type))
   if (PRESENCE_OPS.has(op.type)) publishAgents()
   return entry.board
 }
@@ -369,6 +402,7 @@ export function createBoard({ name, sample, from }: { name?: string; sample?: bo
   entries.set(id, { board, listeners: new Set() })
   if (database) database.enqueue(id, board)
   else writeAtomic(join(BOARDS_DIR, `${id}.json`), JSON.stringify(board))
+  publishCanvasList()
   return id
 }
 
@@ -385,6 +419,7 @@ export function deleteBoard(id: string): boolean {
   }
   store.entries.delete(id)
   if (store.lastOpened === id) store.lastOpened = undefined
+  publishCanvasList()
   publishAgents()
   return true
 }

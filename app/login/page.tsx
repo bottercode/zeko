@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import Image from 'next/image'
 import { redirect } from 'next/navigation'
-import { Mark } from '@/components/TopBar'
+import { Mark } from '@/components/Mark'
 import { SampleCanvasPreview } from '@/components/CanvasPreview'
 import { Button } from '@/components/ui/button'
 import { canvasReturnPath, googleAuthConfigured } from '@/lib/auth-access'

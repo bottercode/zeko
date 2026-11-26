@@ -1,10 +1,7 @@
 import { connection } from 'next/server'
 import { nanoid } from 'nanoid'
 import { createBoard, dispatch, flushCanvas, knownAgents, listBoards, openSampleBoard, prepareStore, storageMode, withWorkspace, workspaceStarted } from '@/lib/server/store'
-import type { Board } from '@/lib/types'
-import { readDesign } from '@/lib/tokens'
-import { readMemoryRules, readSketchComponents } from '@/lib/ops'
-import { readCanvasSkills } from '@/lib/canvas-skills'
+import { readBoardImport } from '@/lib/server/board-import'
 import { agentOrigin, startAgentRequest } from '@/lib/server/agent-runner'
 import { readAcpSelection } from '@/lib/acp'
 
@@ -29,33 +26,28 @@ interface CreateBody {
   assignee?: string
   acp?: unknown
   /** an exported board to start from */
-  board?: Board
+  board?: unknown
 }
-
-const isList = (v: unknown) => Array.isArray(v)
 
 /** Makes a canvas: empty, the sample, from an exported file, or from a request for agents. */
 async function handlePost(request: Request) {
   await prepareStore()
-  const body = ((await request.json().catch(() => null)) ?? {}) as CreateBody
+  const body = await request.json().catch(() => null) as CreateBody | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return Response.json({ error: 'Invalid canvas request.' }, { status: 400 })
   if (body.sample === 'open') {
     const id = openSampleBoard()
     await flushCanvas(id)
     return Response.json({ id })
   }
-  let from: Board | undefined
-  if (body.board) {
-    const b = body.board
-    const ok = typeof b.name === 'string' && isList(b.frames) && !!b.decks && isList(b.comments) && isList(b.tasks)
-    if (!ok) return Response.json({ error: 'That file is not a Zeko board.' }, { status: 400 })
-    from = { ...b, design: readDesign(b.design), components: readSketchComponents(b.components), memoryRules: readMemoryRules(b.memoryRules), skills: readCanvasSkills(b.skills), lanes: isList(b.lanes) ? b.lanes : [], activity: isList(b.activity) ? b.activity : [], agents: {} }
-  }
-  const prompt = body.prompt?.trim().slice(0, 4000)
-  const name = body.name ?? (prompt ? nameFrom(prompt) : undefined)
-  const id = createBoard({ name, sample: body.sample, from })
+  const from = readBoardImport(body.board)
+  if (body.board !== undefined && !from) return Response.json({ error: 'That file is not a valid Zeko canvas export.' }, { status: 400 })
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, 4000) : undefined
+  const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : prompt ? nameFrom(prompt) : undefined
+  const id = createBoard({ name, sample: body.sample === true, from })
   const taskId = prompt ? nanoid(10) : undefined
   if (prompt && taskId) {
-    dispatch(id, { type: 'task.add', id: taskId, text: prompt, frameIds: [], assignee: body.assignee?.slice(0, 40) || undefined, acp: readAcpSelection(body.acp) }, { kind: 'human', name: 'You' })
+    const assignee = typeof body.assignee === 'string' ? body.assignee.slice(0, 40) : undefined
+    dispatch(id, { type: 'task.add', id: taskId, text: prompt, frameIds: [], assignee, acp: readAcpSelection(body.acp) }, { kind: 'human', name: 'You' })
   }
   await flushCanvas(id)
   const origin = taskId && agentOrigin(request)
