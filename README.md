@@ -62,7 +62,9 @@ AUTH_GOOGLE_ID=your-google-client-id
 AUTH_GOOGLE_SECRET=your-google-client-secret
 ```
 
-Generate `AUTH_SECRET` with `openssl rand -base64 32`. Zeko requests the standard OpenID profile and email scopes and requires a verified email. Each Google account opens a private workspace. PostgreSQL stores personal canvases in `zeko.account_canvases` and existing local canvases in `zeko.canvases`. The hosted database role needs SELECT, INSERT, and UPDATE on both tables.
+Generate `AUTH_SECRET` with `openssl rand -base64 32`. Zeko requests the standard OpenID profile and email scopes and requires a verified email. Run `npm run db:migrate` before enabling Google sign-in.
+
+Google sign-in saves the user's profile and latest sign-in time in `zeko.users` and the Google account ID in `zeko.oauth_accounts`. OAuth access and refresh tokens stay out of PostgreSQL. Each user owns the canvases in `zeko.account_canvases`. The original private workspace uses `zeko.canvases`. The hosted database role needs SELECT, INSERT, and UPDATE on these tables.
 
 Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. After setup, Google users can copy a workspace-specific MCP credential from the **MCP** dialog. The previous Basic-auth MCP credentials continue to point to the original workspace, which remains available in a local installation connected to the same database. Embedded agent chat requires a local installation with an authenticated agent CLI.
 

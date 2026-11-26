@@ -83,7 +83,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const token = await getToken({ req: { headers }, secret: process.env.AUTH_SECRET, secureCookie: true })
-  if (!workspaceId(token?.workspace)) {
+  if (!workspaceId(token?.workspace) || token.sub !== token.workspace) {
     if (pathname === '/api' || pathname.startsWith('/api/') || !read) {
       return NextResponse.json({ error: 'Sign in to Zeko.', code: 'sign_in_required' }, { status: 401 })
     }

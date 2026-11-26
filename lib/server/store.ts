@@ -3,8 +3,10 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import { connectDatabase, databaseUrl } from '../db/connection'
+import { databaseUrl, workspaceDatabase } from '../db/connection'
+import { accountCanvases, oauthAccounts, users } from '../db/schema'
 import { googleAuthConfigured, workspaceId, WORKSPACE_HEADER } from '../auth-access'
 import { AGENT_AWAY_MS, applyOp, deckFront, emptyBoard, upgradeSheetLabels, visibleFrames } from '../ops'
 import { addSamplePrototype, SAMPLE_ID, seedBoard } from '../seed'
@@ -109,7 +111,6 @@ function readLastOpened() {
 const g = globalThis as typeof globalThis & {
   __zekoWorkspaceStores?: Map<string, StoreState>
   __zekoWorkspaceScope?: AsyncLocalStorage<StoreState>
-  __zekoWorkspaceDatabase?: ReturnType<typeof connectDatabase>['db']
 }
 const connectionString = databaseUrl()
 export const storageMode = connectionString ? 'postgres' : 'local'
@@ -156,9 +157,16 @@ export function withWorkspace<RequestType extends Request, Args extends unknown[
 }
 
 export async function prepareStore(checkAccounts = false) {
+  if (checkAccounts && googleAuthConfigured()) {
+    const db = workspaceDatabase(connectionString)
+    await db.select({ id: users.id }).from(users)
+      .leftJoin(oauthAccounts, eq(oauthAccounts.userId, users.id))
+      .leftJoin(accountCanvases, eq(accountCanvases.ownerId, users.id))
+      .limit(1)
+  }
   if (!connectionString) return
   const store = state()
-  const db = (g.__zekoWorkspaceDatabase ??= connectDatabase(connectionString).db)
+  const db = workspaceDatabase(connectionString)
   const persistence = (store.database ??= databasePersistence(db, store.ownerId))
   store.ready ??= persistence.load().then((rows) => {
     store.entries = new Map(rows.map(({ id, snapshot }) => [id, { board: stamp(recoverRuns(snapshot)), listeners: new Set() }]))
@@ -167,7 +175,6 @@ export async function prepareStore(checkAccounts = false) {
     throw new Error('Could not load canvases from PostgreSQL. Check DATABASE_URL and run npm run db:migrate.')
   })
   await store.ready
-  if (checkAccounts && googleAuthConfigured()) await databasePersistence(db, 'health').check()
 }
 
 export async function flushCanvas(id: string) {

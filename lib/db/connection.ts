@@ -20,3 +20,12 @@ export function connectDatabase(connectionString: string) {
   pool.on('error', () => console.error('Zeko PostgreSQL idle connection closed.'))
   return { db: drizzle({ client: pool }), close: () => pool.end() }
 }
+
+const globalDatabase = globalThis as typeof globalThis & {
+  __zekoWorkspaceDatabase?: ReturnType<typeof connectDatabase>['db']
+}
+
+export function workspaceDatabase(connectionString = databaseUrl()) {
+  if (!connectionString) throw new Error('DATABASE_URL is required for Google sign-in.')
+  return (globalDatabase.__zekoWorkspaceDatabase ??= connectDatabase(connectionString).db)
+}
