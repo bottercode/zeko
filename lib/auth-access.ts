@@ -1,5 +1,8 @@
 export const WORKSPACE_HEADER = 'x-zeko-workspace'
 export const MCP_TOKEN_SALT = 'zeko-mcp-v1'
+export const ACP_TOKEN_SALT = 'zeko-acp-device-v1'
+export const ACP_RUN_TOKEN_SALT = 'zeko-acp-canvas-v1'
+export const ACP_DEVICE_HEADER = 'x-zeko-acp-device'
 
 export function googleAuthConfigured() {
   return Boolean(
@@ -20,7 +23,7 @@ export function canvasReturnPath(value: unknown) {
   if (typeof value !== 'string' || !value.startsWith('/') || /[\\\s]/.test(value) || value.length > 2048) return '/'
   try {
     const url = new URL(value, base)
-    return url.origin === base && /^\/(?:c\/[\w-]+)?$/.test(url.pathname) ? url.pathname + url.search : '/'
+    return url.origin === base && /^\/(?:c\/[\w-]+|connect\/cli)?$/.test(url.pathname) ? url.pathname + url.search : '/'
   } catch {
     return '/'
   }

@@ -78,6 +78,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const stageRef = useRef<HTMLDivElement>(null)
   const [leftPreference, setLeftClosed] = useState<boolean>()
   const [panelPreference, setPanelClosed] = useState<boolean>()
+  const [agentPanelRequest, setAgentPanelRequest] = useState(0)
   const [preferredPanelWidth, setPreferredPanelWidth] = useState(savedSidePanelWidth)
   const viewport = useSyncExternalStore(subscribeToViewport, viewportWidth, serverViewportWidth)
   const leftClosed = leftPreference ?? (firstCanvas || viewport < 768)
@@ -513,6 +514,10 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         setOpenThread,
         openLoupe,
         openConnect: () => setConnectOpen(true),
+        openAgents: () => {
+          setPanelClosed(false)
+          setAgentPanelRequest((request) => request + 1)
+        },
         openShortcuts: () => setShortcutsOpen(true),
         openSearch: () => setSearchOpen(true),
         addFrame,
@@ -564,6 +569,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         {sampleGuide && <GettingStarted left={railLeft} />}
         <CornerControls onReset={reset} right={panelControlsOffset} />
         <SidePanel
+          agentPanelRequest={agentPanelRequest}
           width={panelWidth}
           maxWidth={maxPanelWidth}
           closed={panelClosed}

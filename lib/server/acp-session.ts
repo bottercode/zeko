@@ -6,6 +6,8 @@ import { delimiter, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { client, ndJsonStream, PROTOCOL_VERSION, type SessionConfigOption, type SessionModeState, type SessionUpdate } from '@agentclientprotocol/sdk'
 import { ACP_AGENTS, acpAgent, type AcpAgentId, type AcpCapabilities, type AcpOption, type AcpSettings } from '../acp'
+import { acpDeviceStatus, openRelaySession } from './acp-relay'
+import { currentWorkspace } from './store'
 
 const CANVAS_TOOLS = [
   'get_board', 'get_frame', 'get_guidelines', 'get_skill', 'claim_task', 'complete_task', 'set_status',
@@ -27,8 +29,11 @@ function agentCommand(agent: typeof ACP_AGENTS[number]) {
   return executable(agent.executable)
 }
 
-export function listAcpAgents() {
-  return ACP_AGENTS.map((agent) => ({ id: agent.id, name: agent.name, available: process.env.ZEKO_HOSTED !== '1' && !!agentCommand(agent) }))
+export function listAcpAgents(workspace = currentWorkspace()) {
+  const remote = process.env.ZEKO_HOSTED === '1' ? acpDeviceStatus(workspace) : undefined
+  return ACP_AGENTS.map((agent) => ({
+    id: agent.id, name: agent.name, available: remote ? remote.agents.includes(agent.id) : !!agentCommand(agent),
+  }))
 }
 
 function choicesFor(option: SessionConfigOption, id: AcpAgentId): AcpOption | undefined {
@@ -49,20 +54,10 @@ function choicesFor(option: SessionConfigOption, id: AcpAgentId): AcpOption | un
 
 export class AcpSessionError extends Error {}
 
-export async function withAcpSession<T>(
-  id: AcpAgentId,
-  settings: AcpSettings,
-  signal: AbortSignal,
-  run: (session: {
-    capabilities: () => AcpCapabilities
-    prompt: (text: string) => Promise<{ stopReason: string }>
-  }) => Promise<T>,
-  options: { mcpUrl?: URL; update?: (update: SessionUpdate) => void; onReady?: () => void } = {},
-) {
-  const agent = acpAgent(id)
-  const command = agent && agentCommand(agent)
-  if (!agent || !command) throw new AcpSessionError('Install and sign in to this agent’s CLI first.')
-  signal.throwIfAborted()
+function openLocalSession(agent: typeof ACP_AGENTS[number], canvasTools: boolean) {
+  const command = agentCommand(agent)
+  if (!command) throw new AcpSessionError('Install and sign in to this agent’s CLI first.')
+  const { id } = agent
   const cwd = mkdtempSync(join(tmpdir(), 'zeko-acp-'))
   const claudePath = process.env.ZEKO_CLAUDE_PATH || executable('claude')
   const child = spawn(/* turbopackIgnore: true */ command, agent.args, {
@@ -74,7 +69,7 @@ export async function withAcpSession<T>(
         CODEX_PATH: process.env.ZEKO_CODEX_PATH || executable('codex'),
         INITIAL_AGENT_MODE: 'read-only',
         // The session endpoint carries the run ID. It must take precedence over the external MCP entry.
-        ...(options.mcpUrl ? { DISABLE_MCP_CONFIG_FILTERING: 'true' } : {}),
+        ...(canvasTools ? { DISABLE_MCP_CONFIG_FILTERING: 'true' } : {}),
         CODEX_CONFIG: JSON.stringify({
           sandbox_mode: 'read-only',
           features: { shell_tool: false, apps: false, hooks: false, plugins: false },
@@ -86,6 +81,35 @@ export async function withAcpSession<T>(
   let spawnError: Error | undefined
   child.once('error', (error) => { spawnError = error })
   child.stdin.on('error', () => { /* The connection reports process shutdown. */ })
+  return {
+    cwd,
+    stream: ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>),
+    launchFailed: () => !!spawnError,
+    close: () => {
+      child.kill()
+      rmSync(cwd, { force: true, recursive: true })
+    },
+  }
+}
+
+export async function withAcpSession<T>(
+  id: AcpAgentId,
+  settings: AcpSettings,
+  signal: AbortSignal,
+  run: (session: {
+    capabilities: () => AcpCapabilities
+    prompt: (text: string) => Promise<{ stopReason: string }>
+  }) => Promise<T>,
+  options: { mcpUrl?: URL; mcpToken?: string; update?: (update: SessionUpdate) => void; onReady?: () => void } = {},
+) {
+  const agent = acpAgent(id)
+  if (!agent) throw new AcpSessionError('Choose an ACP agent.')
+  signal.throwIfAborted()
+  const workspace = currentWorkspace()
+  const transport = process.env.ZEKO_HOSTED === '1'
+    ? await openRelaySession(workspace ?? '', id, !!options.mcpUrl, signal)
+      .catch((error: Error) => { throw new AcpSessionError(error.message) })
+    : openLocalSession(agent, !!options.mcpUrl)
   let config: SessionConfigOption[] = []
   let modes: SessionModeState | null | undefined
   let legacyModels: { currentModelId: string; availableModels: { modelId: string; name: string; description?: string | null }[] } | undefined
@@ -111,10 +135,10 @@ export async function withAcpSession<T>(
       if (update.sessionUpdate === 'config_option_update') config = update.configOptions
       options.update?.(update)
     })
-    .connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>))
+    .connect(transport.stream)
   const peer = connection.agent
   const cancel = () => {
-    if (!sessionId) { child.kill(); return }
+    if (!sessionId) { transport.close(); return }
     void peer.notify('session/cancel', { sessionId }).catch(() => {})
   }
   signal.addEventListener('abort', cancel, { once: true })
@@ -146,8 +170,11 @@ export async function withAcpSession<T>(
     canClose = !!init.agentCapabilities?.sessionCapabilities?.close
     if (options.mcpUrl && !init.agentCapabilities?.mcpCapabilities?.http) throw new AcpSessionError('This agent does not support Zeko’s HTTP canvas tools.')
     const session = await peer.request('session/new', {
-      cwd,
-      mcpServers: options.mcpUrl ? [{ name: 'zeko', type: 'http', url: options.mcpUrl.toString(), headers: [] }] : [],
+      cwd: transport.cwd,
+      mcpServers: options.mcpUrl ? [{
+        name: 'zeko', type: 'http', url: options.mcpUrl.toString(),
+        headers: options.mcpToken ? [{ name: 'Authorization', value: `Bearer ${options.mcpToken}` }] : [],
+      }] : [],
       ...(id === 'claude' ? { _meta: { claudeCode: { options: {
         tools: [], persistSession: false, allowDangerouslySkipPermissions: false, settingSources: [],
         allowedTools: CANVAS_TOOLS.map((tool) => `mcp__zeko__${tool}`),
@@ -196,7 +223,7 @@ export async function withAcpSession<T>(
     })
   } catch (error) {
     if (signal.aborted || error instanceof AcpSessionError) throw error
-    if (spawnError) throw new AcpSessionError(`Couldn’t launch ${agent.name}.`)
+    if (transport.launchFailed()) throw new AcpSessionError(`Couldn’t launch ${agent.name}.`)
     if (/auth|sign.in|login|credential/i.test(error instanceof Error ? error.message : '')) {
       throw new AcpSessionError(`Sign in to ${agent.name} in its CLI and try again.`)
     }
@@ -207,7 +234,6 @@ export async function withAcpSession<T>(
       await peer.request('session/close', { sessionId }, { cancellationSignal: AbortSignal.timeout(500), stopWaitingOnCancel: true }).catch(() => {})
     }
     connection.close()
-    child.kill()
-    rmSync(cwd, { force: true, recursive: true })
+    transport.close()
   }
 }

@@ -1,16 +1,18 @@
 import 'server-only'
 import { createUIMessageStream, readUIMessageStream } from 'ai'
 import { nanoid } from 'nanoid'
+import { encode } from 'next-auth/jwt'
+import { ACP_RUN_TOKEN_SALT } from '../auth-access'
 import { acpAgent, readAcpSelection, type AcpToolActivity } from '../acp'
 import { DEFAULT_CHAT_ID, localAgentProvider } from '../ops'
 import type { Actor, Task } from '../types'
 import { AcpSessionError, withAcpSession } from './acp-session'
-import { dispatch, getBoard, hasBoard } from './store'
+import { currentWorkspace, dispatch, getBoard, hasBoard } from './store'
 
 const UPDATE_INTERVAL = 50
 const runtime = globalThis as typeof globalThis & { __zekoAcpRuns?: Map<string, AbortController> }
 const runs = runtime.__zekoAcpRuns ??= new Map<string, AbortController>()
-const runKey = (boardId: string, taskId: string) => `${boardId}:${taskId}`
+const runKey = (boardId: string, taskId: string) => `${currentWorkspace() ?? 'local'}:${boardId}:${taskId}`
 
 /** Browser actions that launch a local process come from Zeko's loopback origin. */
 export function localAgentOrigin(request: Request): string | undefined {
@@ -25,6 +27,14 @@ export function localAgentOrigin(request: Request): string | undefined {
   } catch {
     return undefined
   }
+}
+
+export function agentOrigin(request: Request) {
+  if (currentWorkspace()) {
+    const origin = process.env.AUTH_URL
+    return origin && request.headers.get('origin') === new URL(origin).origin ? origin : undefined
+  }
+  return localAgentOrigin(request)
 }
 
 export function stopAgentRequest(boardId: string, taskId: string) {
@@ -103,6 +113,13 @@ async function runAgent(
   const lengths = { text: 0, reasoning: 0 }
 
   try {
+    const workspace = currentWorkspace()
+    const mcpToken = workspace ? await encode({
+      secret: process.env.AUTH_SECRET!,
+      salt: ACP_RUN_TOKEN_SALT,
+      maxAge: 11 * 60,
+      token: { workspace, board: boardId, task: taskId, run: runId, as: actor.name },
+    }) : undefined
     const stream = createUIMessageStream({
       onError: (error) => {
         const reason = signal.aborted ? signal.reason : error
@@ -120,6 +137,7 @@ async function runAgent(
         try {
           const result = await withAcpSession(selection.agent, selection.settings, signal, (session) => session.prompt(prompt), {
             mcpUrl: url,
+            mcpToken,
             onReady: () => { if (current()) dispatch(boardId, { type: 'task.claim', id: taskId }, actor) },
             update: (update) => {
               if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {

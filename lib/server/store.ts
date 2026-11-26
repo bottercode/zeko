@@ -137,6 +137,10 @@ export function personalWorkspace() {
   return !!scope.getStore()?.ownerId
 }
 
+export function currentWorkspace() {
+  return state().ownerId
+}
+
 export function withWorkspace<RequestType extends Request, Args extends unknown[]>(
   handler: (request: RequestType, ...args: Args) => Promise<Response>,
 ) {

@@ -5,7 +5,7 @@ import type { Board, Op } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
 import { readMemoryRules, readSketchComponents } from '@/lib/ops'
 import { readCanvasSkills } from '@/lib/canvas-skills'
-import { localAgentOrigin, startAgentRequest, stopAgentRequest } from '@/lib/server/agent-runner'
+import { agentOrigin, startAgentRequest, stopAgentRequest } from '@/lib/server/agent-runner'
 
 const HUMAN_OPS = new Set<Op['type']>([
   'board.update',
@@ -52,9 +52,9 @@ async function handlePost(request: Request) {
   const id = await canvasOf(request)
   if (!id) return noCanvas()
   const op = (await request.json().catch(() => null)) as Op | { type: 'task.start'; id: string } | { type: 'task.stop'; id: string } | null
-  const origin = localAgentOrigin(request)
+  const origin = agentOrigin(request)
   if (op?.type === 'task.stop') {
-    if (!origin) return Response.json({ error: 'Open Zeko on localhost to stop the agent.' }, { status: 403 })
+    if (!origin) return Response.json({ error: 'Open the canvas to stop this reply.' }, { status: 403 })
     if (typeof op.id !== 'string' || !stopAgentRequest(id, op.id)) {
       return Response.json({ error: 'This reply has already stopped.' }, { status: 409 })
     }
@@ -63,7 +63,7 @@ async function handlePost(request: Request) {
     return Response.json({ version })
   }
   if (op?.type === 'task.start') {
-    if (!origin) return Response.json({ error: 'Open Zeko on localhost to start the agent.' }, { status: 403 })
+    if (!origin) return Response.json({ error: 'Open the canvas to start this reply.' }, { status: 403 })
     if (typeof op.id !== 'string' || !startAgentRequest(id, op.id, origin)) {
       return Response.json({ error: 'This request is unavailable to start.' }, { status: 409 })
     }

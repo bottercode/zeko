@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Circle, Frame as FrameIcon, Globe, Hand, LayoutGrid, Maximize, MessageCircle, Minus, MousePointer2, PanelLeftOpen, PenLine, PenTool, PencilRuler, Plug, Plus, Radio, Route, Square, SquareDashedMousePointer, Type } from 'lucide-react'
+import { Circle, Frame as FrameIcon, Globe, Hand, LayoutGrid, Maximize, MessageCircle, Minus, MousePointer2, PanelLeftOpen, PenLine, PenTool, PencilRuler, Plus, Radio, Route, Square, SquareDashedMousePointer, Type } from 'lucide-react'
 import { AGENT_AWAY_MS, deckFront, visibleFrames } from '@/lib/ops'
 import { FrameCard } from './FrameCard'
 import { LIVE_FRAMES } from '@/lib/features'
 import { CHROME, isDrawTool, useStudio, type Tool } from './studio-context'
 import { Button, IconButton, Tip } from './kit'
 import { Separator } from './ui/separator'
+import { AcpConnection } from './AcpConnection'
 import { DrawLayer } from './DrawLayer'
 import { ProtoLinks } from './ProtoLinks'
 
@@ -215,7 +216,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
 }
 
 function EmptyTable({ leftInset, rightInset }: { leftInset: number; rightInset: number }) {
-  const { addFrame, openConnect } = useStudio()
+  const { addFrame, openAgents } = useStudio()
   return (
     <div className="pointer-events-none absolute grid place-items-center" style={{ inset: `${CHROME.top}px ${rightInset}px ${CHROME.bottom}px ${leftInset}px` }}>
       <div className="pointer-events-auto flex max-w-sm flex-col items-center text-center">
@@ -227,7 +228,7 @@ function EmptyTable({ leftInset, rightInset }: { leftInset: number; rightInset: 
           Connect your coding agent to design on this canvas, or add a sketch yourself.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <Button variant="primary" onClick={openConnect}><Plug size={14} /> Connect an agent</Button>
+          <AcpConnection openAgents={openAgents} />
           <Button variant="ghost" onClick={() => addFrame('sketch')}>
             <PenLine size={14} /> Add sketch
           </Button>

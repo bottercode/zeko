@@ -1,13 +1,11 @@
 'use client'
 
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import { Check, Copy, Link2, Plug, Terminal } from 'lucide-react'
-import { CLI_INSTALL_COMMAND } from '@/lib/cli-release'
+import { Check, Copy, Link2, Plug } from 'lucide-react'
 import { ago } from '@/lib/client/useBoard'
 import { AGENT_AWAY_MS } from '@/lib/ops'
 import type { AgentPresence } from '@/lib/types'
 import { AgentAvatar } from './AgentAvatar'
-import { ChoiceSelect } from './ChoiceSelect'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from './ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
@@ -108,62 +106,11 @@ function CopyBlock({ text, display = text, action, prompt = false }: { text: str
   )
 }
 
-function CliSetup({ origin, hosted, credential, retry, canvas, agents, prompt }: {
-  origin: string
-  hosted: boolean
-  credential: Credential
-  retry: () => void
-  canvas?: { id: string }
-  agents: readonly Pick<AgentPresence, 'name' | 'companion'>[]
-  prompt: string
-}) {
-  const [provider, setProvider] = useState('codex')
-  const flags = `--provider ${provider} --url "${origin}"`
-  const boardFlag = canvas ? ` --board "${canvas.id}"` : ''
-  const token = credential?.token
-  const connected = agents.some((agent) => agent.name.toLowerCase() === provider && agent.companion)
-  return (
-    <div className="editor-content flex flex-col gap-5 px-4 py-5 sm:px-6">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium">Coding agent</span>
-        <ChoiceSelect label="Coding agent" value={provider} onChange={setProvider} options={[
-          { value: 'codex', label: 'Codex' },
-          { value: 'claude', label: 'Claude Code' },
-        ]} />
-      </div>
-      <SetupStep number={1} title="Install the Zeko CLI" description="Run this in your terminal once. Requires Node.js 20.9 or later.">
-        <CopyBlock text={CLI_INSTALL_COMMAND} action="Copy install" />
-      </SetupStep>
-      {hosted && <SetupStep number={2} title="Connect your workspace" description="Run the setup command, then paste the token when the terminal prompts you.">
-        {!credential ? (
-          <p role="status" className="text-sm text-muted-foreground">Getting connection details…</p>
-        ) : credential.error ? (
-          <Button variant="outline" onClick={retry}>Retry</Button>
-        ) : token ? (
-          <div className="flex flex-col gap-2">
-            <CopyBlock text={`zeko connect ${flags}${boardFlag}`} action="Copy setup" />
-            <CopyBlock text={token} display="Private workspace token" action="Copy token" />
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Sign in with Google to connect the hosted workspace.</p>
-        )}
-      </SetupStep>}
-      {(!hosted || token) && <SetupStep number={hosted ? 3 : 2} title="Open your agent" description="Run this in your project. Sign in to the coding agent first if prompted.">
-        <div className="flex flex-col gap-2">
-          <CopyBlock text={`zeko launch ${flags}${!hosted ? boardFlag : ''}`} action="Copy launch" />
-          {connected && <p role="status" className="flex items-center gap-2 text-xs text-live"><Check size={13} aria-hidden /> CLI connected</p>}
-          <CopyBlock text={prompt} action="Copy prompt" prompt />
-        </div>
-      </SetupStep>}
-    </div>
-  )
-}
-
 export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   trigger?: ReactElement
-  agents: readonly Pick<AgentPresence, 'name' | 'mcpConnectedAt' | 'companion'>[]
+  agents: readonly Pick<AgentPresence, 'name' | 'mcpConnectedAt'>[]
   now: number
   canvas?: { id: string; name: string }
 }) {
@@ -199,15 +146,14 @@ export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas
             <Plug size={19} strokeWidth={1.75} />
           </div>
           <div className="min-w-0 pt-0.5 pr-6">
-            <DialogTitle className="text-lg font-semibold tracking-tight">Connect an agent</DialogTitle>
+            <DialogTitle className="text-lg font-semibold tracking-tight">MCP connection</DialogTitle>
             <DialogDescription className="mt-1 text-sm leading-relaxed text-slate">
-              Choose how your coding agent connects to your canvas.
+              Give an external MCP client access to this canvas.
             </DialogDescription>
           </div>
         </header>
-        <Tabs defaultValue={hosted ? 'cli' : 'codex'} className="gap-0">
-          <TabsList aria-label="Coding tool" activateOnFocus className="mx-4 grid w-auto grid-cols-2 gap-1 self-stretch p-1 group-data-horizontal/tabs:h-auto sm:mx-6 sm:grid-cols-5">
-            <TabsTrigger value="cli" className="h-11 gap-2"><Terminal aria-hidden /> Zeko CLI</TabsTrigger>
+        <Tabs defaultValue="codex" className="gap-0">
+          <TabsList aria-label="Coding tool" activateOnFocus className="mx-4 grid w-auto grid-cols-2 gap-1 self-stretch p-1 group-data-horizontal/tabs:h-auto sm:mx-6 sm:grid-cols-4">
             {CLIENTS.map(({ id, name, agent }) => (
               <TabsTrigger key={id} value={id} className="h-11 gap-2">
                 {id === 'other' ? <Link2 aria-hidden className="size-5" strokeWidth={1.75} /> : <AgentAvatar name={agent} size={24} />}
@@ -215,9 +161,6 @@ export function ConnectDialog({ open, onOpenChange, trigger, agents, now, canvas
               </TabsTrigger>
             ))}
           </TabsList>
-          <TabsContent value="cli">
-            <CliSetup origin={origin} hosted={hosted} credential={credential} retry={() => setCredential(null)} canvas={canvas} agents={agents} prompt={prompt} />
-          </TabsContent>
           {CLIENTS.map((client) => {
             const url = `${origin}/api/mcp?${new URLSearchParams({ as: client.agent, ...(canvas ? { board: canvas.id } : {}) })}`
             const agent = agents.find((agent) => agent.name === client.agent)

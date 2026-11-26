@@ -83,6 +83,7 @@ export interface StudioState {
 
   openLoupe: (ids?: string[]) => void
   openConnect: () => void
+  openAgents: () => void
   openShortcuts: () => void
   openSearch: () => void
   addFrame: (kind: 'live' | 'sketch', component?: SketchComponent) => void

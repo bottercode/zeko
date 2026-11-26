@@ -1,10 +1,14 @@
 {
   "name": "@botter_code/zeko",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
-  "description": "Connect Codex and Claude Code to a Zeko canvas.",
+  "description": "Connect local ACP agents to Zeko chat.",
   "repository": { "type": "git", "url": "git+https://github.com/bottercode/zeko.git", "directory": "packages/cli" },
   "bin": { "zeko": "./zeko.mjs" },
   "files": ["zeko.mjs"],
-  "engines": { "node": ">=20.9" }
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.110.0",
+    "@agentclientprotocol/codex-acp": "2.11.0"
+  }
 }

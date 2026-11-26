@@ -24,6 +24,7 @@ const TABS: { id: Tab; label: string; Icon: LucideIcon }[] = [
 ]
 
 interface SidePanelProps {
+  agentPanelRequest: number
   width: number
   maxWidth: number
   closed: boolean
@@ -59,16 +60,17 @@ export function DesignPanel({ open, right, width, overlay, onOpenChange }: {
   )
 }
 
-export function SidePanel({ width, maxWidth, closed, onClosedChange, onResize }: SidePanelProps) {
+export function SidePanel({ agentPanelRequest, width, maxWidth, closed, onClosedChange, onResize }: SidePanelProps) {
   const { board, pageId } = useStudio()
-  const [tab, setTab] = useState<Tab>('agents')
+  const [selection, setSelection] = useState<{ tab: Tab; request: number }>({ tab: 'agents', request: 0 })
+  const tab = selection.request === agentPanelRequest ? selection.tab : 'agents'
   const resizeStart = useRef<{ x: number; width: number } | null>(null)
   const openTasks = board.tasks.filter((t) => t.status !== 'done').length
   const openComments = board.comments.filter((c) => !c.resolved && board.frames.some((f) => f.id === c.frameId && framePage(board, f) === pageId)).length
   const counts: Partial<Record<Tab, number>> = { agents: openTasks, comments: openComments }
   const show = (next: Tab) => {
     onClosedChange(false)
-    setTab(next)
+    setSelection({ tab: next, request: agentPanelRequest })
   }
 
   return (

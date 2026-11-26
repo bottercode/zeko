@@ -7,6 +7,7 @@ import { visibleFrames } from '@/lib/ops'
 import { newId } from '@/lib/client/useBoard'
 import type { Frame, TaskElement } from '@/lib/types'
 import { AcpAgentPicker, AcpOptionPicker, useAcpOptions } from './AcpComposerOptions'
+import { AcpConnection } from './AcpConnection'
 import { useStudio } from './studio-context'
 import { Button, IconButton, Tip } from './kit'
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from './ui/input-group'
@@ -62,6 +63,7 @@ export function Composer({ chatId, inputRef, activeTask, previous }: {
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); send() }} className="editor-divider shrink-0 border-t p-2.5 transition-colors focus-within:bg-wash/25">
+      <AcpConnection />
       {attached.length > 0 && (
         <div role="group" aria-label="Request attachments" className="flex flex-wrap gap-1 px-1 pt-0.5 pb-1.5">
           {attached.slice(0, 3).map((frame) => {

@@ -1,12 +1,18 @@
 import { connection } from 'next/server'
 import { readAcpSelection, type AcpCapabilities, type AcpSelection } from '@/lib/acp'
 import { AcpSessionError, listAcpAgents, withAcpSession } from '@/lib/server/acp-session'
-import { localAgentOrigin } from '@/lib/server/agent-runner'
+import { agentOrigin } from '@/lib/server/agent-runner'
+import { acpDeviceFor } from '@/lib/server/acp-relay'
+import { currentWorkspace, withWorkspace } from '@/lib/server/store'
 
 type OptionCache = { data?: AcpCapabilities; at?: number; pending?: Promise<AcpCapabilities> }
 const runtime = globalThis as typeof globalThis & { __zekoAcpOptions?: Map<string, OptionCache> }
 const cache = runtime.__zekoAcpOptions ??= new Map<string, OptionCache>()
-const keyOf = ({ agent, settings }: AcpSelection) => JSON.stringify([agent, Object.entries(settings).sort()])
+const keyOf = ({ agent, settings }: AcpSelection) => {
+  const workspace = currentWorkspace()
+  const device = workspace ? acpDeviceFor(workspace, agent)?.id : 'local'
+  return JSON.stringify([workspace, device, agent, Object.entries(settings).sort()])
+}
 const base = (agent: AcpSelection['agent']): AcpSelection => ({ agent, settings: {} })
 
 function optionsFor(selection: AcpSelection, refresh = false): Promise<AcpCapabilities> {
@@ -30,7 +36,7 @@ function optionsFor(selection: AcpSelection, refresh = false): Promise<AcpCapabi
   return entry.pending
 }
 
-export async function GET(request: Request) {
+export const GET = withWorkspace(async (request: Request) => {
   await connection()
   const agents = listAcpAgents()
   const catalog = Object.fromEntries(agents.flatMap(({ id }) => {
@@ -43,10 +49,10 @@ export async function GET(request: Request) {
     }
   }
   return Response.json({ agents, catalog })
-}
+})
 
-export async function POST(request: Request) {
-  if (!localAgentOrigin(request)) return Response.json({ error: 'Open Zeko on localhost to use ACP.' }, { status: 403 })
+export const POST = withWorkspace(async (request: Request) => {
+  if (!agentOrigin(request)) return Response.json({ error: 'Open Zeko to use ACP.' }, { status: 403 })
   const body = await request.json().catch(() => null)
   const selection = readAcpSelection(body)
   if (!selection) return Response.json({ error: 'Choose an ACP agent.' }, { status: 400 })
@@ -56,4 +62,4 @@ export async function POST(request: Request) {
     const message = error instanceof AcpSessionError ? error.message : 'The ACP agent did not respond.'
     return Response.json({ error: message }, { status: 502 })
   }
-}
+})

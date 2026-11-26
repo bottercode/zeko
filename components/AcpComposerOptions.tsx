@@ -13,7 +13,13 @@ import {
 } from './ui/dropdown-menu'
 
 const triggerStyle = 'editor-control min-w-0 max-w-36 border-0 px-1.5 text-xs dark:bg-transparent dark:hover:bg-transparent'
-const defaults = ACP_AGENTS.map(({ id, name, bundled }) => ({ id, name, available: bundled }))
+const defaults = ACP_AGENTS.map(({ id, name }) => ({ id, name, available: false }))
+type AcpStatus = { agents: AcpAgentStatus[]; hosted: boolean; connected: boolean }
+const initialStatus: AcpStatus = { agents: defaults, hosted: false, connected: false }
+let acpStatus = initialStatus
+const statusListeners = new Set<() => void>()
+let events: EventSource | undefined
+let initialRequest: AbortController | undefined
 
 const CACHE_KEY = 'zeko.acp.options.v1'
 type Catalog = Record<string, AcpOption[]>
@@ -24,7 +30,9 @@ const listeners = new Set<() => void>()
 
 function publishCatalog(next: Catalog) {
   catalog = { ...catalog, ...next }
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(catalog)) } catch {}
+  if (!acpStatus.hosted) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(catalog)) } catch {}
+  }
   listeners.forEach((listener) => listener())
 }
 
@@ -37,20 +45,49 @@ function subscribeCatalog(listener: () => void) {
   return () => { listeners.delete(listener) }
 }
 
-export function useAcpAgents() {
-  const [agents, setAgents] = useState<AcpAgentStatus[]>(defaults)
-  useEffect(() => {
+function publishStatus(next: AcpStatus) {
+  if (next.hosted && !acpStatus.hosted) {
+    catalog = emptyCatalog
+    listeners.forEach((listener) => listener())
+  }
+  acpStatus = next
+  statusListeners.forEach((listener) => listener())
+}
+
+function subscribeStatus(listener: () => void) {
+  statusListeners.add(listener)
+  if (!events) {
+    events = new EventSource('/api/acp/events')
+    events.onmessage = (event) => publishStatus(JSON.parse(event.data) as AcpStatus)
+    events.onerror = () => {
+      if (acpStatus.hosted && acpStatus.connected) publishStatus({
+        ...acpStatus, connected: false, agents: defaults,
+      })
+    }
     const abort = new AbortController()
+    initialRequest = abort
     void fetch('/api/acp', { signal: abort.signal })
       .then((response) => response.json())
-      .then((data: { agents?: AcpAgentStatus[]; catalog?: Catalog }) => {
+      .then((data: { catalog?: Catalog }) => {
         if (abort.signal.aborted) return
-        if (data.agents) setAgents(data.agents)
         if (data.catalog) publishCatalog(data.catalog)
       }).catch(() => {})
-    return () => abort.abort()
-  }, [])
-  return agents
+  }
+  return () => {
+    statusListeners.delete(listener)
+    if (statusListeners.size) return
+    initialRequest?.abort()
+    events?.close()
+    events = undefined
+  }
+}
+
+export function useAcpStatus() {
+  return useSyncExternalStore(subscribeStatus, () => acpStatus, () => initialStatus)
+}
+
+export function useAcpAgents() {
+  return useAcpStatus().agents
 }
 
 export function useAcpOptions(agent: AcpAgentId, settings: AcpSettings) {
@@ -134,7 +171,7 @@ export function AcpAgentPicker({ agents, selected, onSelect }: {
             <SelectItem key={agent.id} value={agent.id} disabled={!agent.available}>
               <AgentAvatar name={agent.name} size={16} />
               <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-              {!agent.available && <span className="text-xs text-muted-foreground">Install CLI</span>}
+              {!agent.available && <span className="text-xs text-muted-foreground">Unavailable</span>}
             </SelectItem>
           ))}
         </SelectGroup>

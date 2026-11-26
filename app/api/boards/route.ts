@@ -5,7 +5,7 @@ import type { Board } from '@/lib/types'
 import { readDesign } from '@/lib/tokens'
 import { readMemoryRules, readSketchComponents } from '@/lib/ops'
 import { readCanvasSkills } from '@/lib/canvas-skills'
-import { localAgentOrigin, startAgentRequest } from '@/lib/server/agent-runner'
+import { agentOrigin, startAgentRequest } from '@/lib/server/agent-runner'
 import { readAcpSelection } from '@/lib/acp'
 
 /** Every canvas, most recently edited first, and the agents seen on any of them. */
@@ -58,7 +58,7 @@ async function handlePost(request: Request) {
     dispatch(id, { type: 'task.add', id: taskId, text: prompt, frameIds: [], assignee: body.assignee?.slice(0, 40) || undefined, acp: readAcpSelection(body.acp) }, { kind: 'human', name: 'You' })
   }
   await flushCanvas(id)
-  const origin = taskId && localAgentOrigin(request)
+  const origin = taskId && agentOrigin(request)
   if (taskId && origin) startAgentRequest(id, taskId, origin)
   return Response.json({ id }, { status: 201 })
 }

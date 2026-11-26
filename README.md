@@ -74,17 +74,17 @@ Zeko reads models, thinking effort, and other session settings from the selected
 
 ## Zeko CLI
 
-Install Node.js 20.9 or later, then install the CLI from npm.
+Install Node.js 22 or later, then install the CLI from npm.
 
 ```bash
-npm install -g @botter_code/zeko
+npm install -g @botter_code/zeko@latest
 ```
 
 If you installed the earlier GitHub release, run `npm uninstall -g @zeko/cli` before installing from npm.
 
-Open a canvas and select **Connect an agent → Zeko CLI**. The dialog provides commands for Codex or Claude Code. For hosted Zeko, `zeko connect` saves the workspace token on your computer, and `zeko launch` starts your coding agent with that canvas attached. Run the launch command in the repository you want your agent to work on.
+Run `zeko` once and approve it in your browser. The Agents panel shows **CLI connected** when the desktop process is online. Codex and Claude Code run on your computer and use their local sign-in. Chat, model options, and cancellation go through ACP.
 
-The CLI companion reconnects when Zeko restarts. Use `zeko agent status` and `zeko agent stop` to manage it, passing the same `--url` and `--provider` you used to launch. For local Zeko, use `zeko launch --url http://localhost:4747`. Hosted tokens expire after 30 days. Run the connection step again to refresh one.
+Use `zeko status` to check the connection and `zeko stop` to stop the companion. It reconnects while running and the device approval is valid for 30 days. Run `zeko --pair` to approve it again or switch accounts.
 
 ## External MCP connection
 
