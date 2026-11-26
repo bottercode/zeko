@@ -668,7 +668,7 @@ async function route(request: Request) {
   const params = new URL(request.url).searchParams
   await store.prepareStore()
   const boardId = params.get('board')
-  const empty = store.personalWorkspace() && store.listBoards().length === 0
+  const empty = store.personalWorkspace() && !store.hasCanvases()
   const id = boardId ? store.hasBoard(boardId) ? boardId : null : empty ? '' : store.resolveId()
   if (id === null) return Response.json({ error: 'No such canvas. Leave out ?board= to work on the canvas the person has open.' }, { status: 404 })
   const scope: CanvasScope = { id }
@@ -683,8 +683,10 @@ async function route(request: Request) {
   }
   const response = await canvas.run(scope, () => handler(request))
   if (scope.dirty) await store.flushCanvas(id)
-  if (scope.presenceRequestId !== undefined && await acceptedRequest(response, scope.presenceRequestId) && store.hasBoard(id)) {
-    store.dispatch(id, { type: 'agent.connect' }, agentFrom(request))
+  const actor = agentFrom(request)
+  if (scope.presenceRequestId !== undefined && store.needsMcpPresence(id, actor) &&
+      await acceptedRequest(response, scope.presenceRequestId) && store.needsMcpPresence(id, actor)) {
+    store.dispatch(id, { type: 'agent.connect' }, actor)
   }
   return response
 }

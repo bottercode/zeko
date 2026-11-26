@@ -7,6 +7,7 @@ export function eventStream<T>(
 ) {
   const encoder = new TextEncoder()
   let cleanup = () => {}
+  let flush = () => {}
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -14,28 +15,51 @@ export function eventStream<T>(
         controller.close()
         return
       }
-      const push = (text: string) => {
-        try {
-          controller.enqueue(encoder.encode(text))
-        } catch {
-          cleanup()
-        }
+      let closed = false
+      let scheduled = false
+      let latest: { snapshot: T } | undefined = { snapshot: read() }
+      const writable = () => !closed && (controller.desiredSize ?? 0) > 0
+      const push = (text: string) => controller.enqueue(encoder.encode(text))
+      flush = () => {
+        if (!latest || !writable()) return
+        const { snapshot } = latest
+        latest = undefined
+        push(`data: ${JSON.stringify(snapshot)}\n\n`)
       }
-      const send = (snapshot: T) => push(`data: ${JSON.stringify(snapshot)}\n\n`)
-      const first = read()
+      const send = (snapshot: T) => {
+        if (closed) return
+        // Consumers render the latest complete state. Keep one pending snapshot during bursts.
+        latest = { snapshot }
+        if (scheduled) return
+        scheduled = true
+        queueMicrotask(() => {
+          scheduled = false
+          flush()
+        })
+      }
       const unsubscribe = subscribe(send)
-      const heartbeat = setInterval(() => push(': ping\n\n'), 20_000)
+      const heartbeat = setInterval(() => {
+        if (latest) flush()
+        else if (writable()) push(': ping\n\n')
+      }, 20_000)
       const abort = () => {
         cleanup()
         controller.close()
       }
       cleanup = () => {
+        if (closed) return
+        closed = true
+        latest = undefined
         clearInterval(heartbeat)
         unsubscribe()
         signal.removeEventListener('abort', abort)
       }
       signal.addEventListener('abort', abort, { once: true })
-      send(first)
+      if (signal.aborted) abort()
+      else flush()
+    },
+    pull() {
+      if (!signal.aborted) flush()
     },
     cancel() {
       cleanup()
@@ -46,6 +70,7 @@ export function eventStream<T>(
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
     },
   })

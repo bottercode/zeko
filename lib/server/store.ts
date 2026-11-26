@@ -267,6 +267,19 @@ export function hasBoard(id: string) {
   return state().entries.has(id)
 }
 
+export function hasCanvases() {
+  return state().entries.size > 0
+}
+
+const MCP_PRESENCE_INTERVAL = 5000
+
+export function needsMcpPresence(id: string, actor: Actor) {
+  const agents = state().entries.get(id)?.board.agents
+  if (!agents) return false
+  const connected = Object.hasOwn(agents, actor.name) ? agents[actor.name]?.mcpConnectedAt : undefined
+  return !connected || Date.now() - connected >= MCP_PRESENCE_INTERVAL
+}
+
 export function getBoard(id: string): Board {
   const entry = state().entries.get(id)!
   const upgradedLabels = upgradeSheetLabels(entry.board)
