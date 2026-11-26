@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, X } from 'lucide-react'
 import type { Frame } from '@/lib/types'
+import { tokenCss } from '@/lib/tokens'
 import { FrameSurface } from './FrameCard'
 import { useStudio } from './studio-context'
 import { Button } from './ui/button'
@@ -147,7 +148,7 @@ function Plate({ frame, scale, caption, width, height }: { frame: Frame; scale: 
     <figure className="m-0">
       <div className="relative overflow-hidden rounded-sm bg-white shadow-pop" style={{ width: w * scale, height: h * scale }}>
         <div inert className="absolute top-0 left-0 origin-top-left" style={{ width: w, height: h, transform: `scale(${scale})` }}>
-          <FrameSurface frame={frame} appUrl={board.appUrl} />
+          <FrameSurface frame={frame} appUrl={board.appUrl} css={tokenCss(board.design)} />
         </div>
       </div>
       {caption && <figcaption className="mt-2 text-sm text-white/80">{caption}</figcaption>}

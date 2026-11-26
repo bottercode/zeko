@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { ACP_AGENTS } from './agents.mjs'
 
 const CLI = fileURLToPath(import.meta.url)
 const require = createRequire(import.meta.url)
@@ -139,9 +140,19 @@ function executable(name) {
 }
 
 function adapters() {
-  const result = {}
-  try { result.codex = require.resolve('@agentclientprotocol/codex-acp') } catch {}
-  try { result.claude = join(dirname(require.resolve('@agentclientprotocol/claude-agent-acp/package.json')), 'dist', 'index.js') } catch {}
+  const result = new Map()
+  try {
+    result.set('codex', { command: process.execPath, args: [require.resolve('@agentclientprotocol/codex-acp')] })
+  } catch {}
+  try {
+    const entry = join(dirname(require.resolve('@agentclientprotocol/claude-agent-acp/package.json')), 'dist', 'index.js')
+    result.set('claude', { command: process.execPath, args: [entry] })
+  } catch {}
+  for (const agent of ACP_AGENTS) {
+    if (agent.bundled) continue
+    const command = executable(agent.executable)
+    if (command) result.set(agent.id, { command, args: agent.args })
+  }
   return result
 }
 
@@ -162,11 +173,11 @@ async function* events(body, touch) {
 
 async function relay(origin, token, stop, update) {
   const endpoint = new URL('/api/acp/relay', origin)
-  const commands = adapters()
-  endpoint.searchParams.set('agents', Object.keys(commands).join(','))
   const auth = { Authorization: `Bearer ${token}` }
   let backoff = 500
   while (!stop.aborted) {
+    const commands = adapters()
+    endpoint.searchParams.set('agents', [...commands.keys()].join(','))
     const attempt = new AbortController()
     const signal = AbortSignal.any([stop, attempt.signal])
     const sessions = new Map()
@@ -183,12 +194,12 @@ async function relay(origin, token, stop, update) {
       signal,
     })
     const launch = async ({ id, agent, canvasTools }) => {
-      const adapter = commands[agent]
+      const adapter = commands.get(agent)
       if (!adapter || sessions.has(id)) { await post({ id, closed: true }); return }
       const cwd = await mkdtemp(join(tmpdir(), 'zeko-acp-'))
       const codex = process.env.ZEKO_CODEX_PATH || executable('codex')
       const claude = process.env.ZEKO_CLAUDE_PATH || executable('claude')
-      const child = spawn(process.execPath, [adapter], {
+      const child = spawn(adapter.command, adapter.args, {
         cwd,
         stdio: ['pipe', 'pipe', 'ignore'],
         env: {
@@ -201,7 +212,7 @@ async function relay(origin, token, stop, update) {
               sandbox_mode: 'read-only',
               features: { shell_tool: false, apps: false, hooks: false, plugins: false },
             }),
-          } : claude ? { CLAUDE_CODE_EXECUTABLE: claude } : {}),
+          } : agent === 'claude' && claude ? { CLAUDE_CODE_EXECUTABLE: claude } : {}),
         },
       })
       child.stdin.on('error', () => {})

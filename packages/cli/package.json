@@ -5,7 +5,7 @@
   "description": "Connect local ACP agents to Zeko chat.",
   "repository": { "type": "git", "url": "git+https://github.com/bottercode/zeko.git", "directory": "packages/cli" },
   "bin": { "zeko": "./zeko.mjs" },
-  "files": ["zeko.mjs"],
+  "files": ["zeko.mjs", "agents.mjs"],
   "engines": { "node": ">=22" },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.110.0",

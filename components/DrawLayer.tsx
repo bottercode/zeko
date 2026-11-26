@@ -22,7 +22,7 @@ import {
   type Point,
 } from '@/lib/client/draw'
 import type { Frame, ShapeKind } from '@/lib/types'
-import { useStudio } from './studio-context'
+import { useCameraSnapshot, useStudio } from './studio-context'
 
 const BLANK_FRAME = '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff"></body></html>'
 const CLICK = 4 // screen pixels a press can wander and still count as a click
@@ -38,7 +38,8 @@ type TextDraft = { at: Point; frameId: string | null; existing?: NonNullable<Ret
  * they go into its page where they were drawn.
  */
 export function DrawLayer({ zoomHeld, zoomOut }: { zoomHeld: boolean; zoomOut: boolean }) {
-  const { board, pageId, camera, setCamera, tool, setTool, dispatch, select, stageRef, playerOpen } = useStudio()
+  const { board, pageId, setCamera, tool, setTool, dispatch, select, stageRef, playerOpen } = useStudio()
+  const camera = useCameraSnapshot()
   const [box, setBox] = useState<BoxDraft | null>(null)
   const [pen, setPen] = useState<PenDraft | null>(null)
   const [text, setText] = useState<TextDraft | null>(null)

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { deckFront, framePage, pageStart, visibleFrames } from '@/lib/ops'
 import type { Board, Frame } from '@/lib/types'
-import { useStudio } from './studio-context'
+import { useCameraZoom, useStudio } from './studio-context'
 
 export const LINK = '#5b6cff'
 
@@ -19,9 +19,9 @@ export function linkTarget(board: Board, id: string): Frame | undefined {
  * picked element a handle to drag onto another screen to link it.
  */
 export function ProtoLinks() {
-  const { board, pageId, camera, hotspots, interactId, element, toFrame, stageRef } = useStudio()
+  const { board, pageId, viewport, hotspots, interactId, element, toFrame, stageRef } = useStudio()
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
-  const k = 1 / camera.z
+  const k = 1 / useCameraZoom()
   const frames = visibleFrames(board, pageId).filter((f) => f.kind === 'sketch' && !f.shape)
   const startId = pageStart(board, pageId)
   const start = startId ? linkTarget(board, startId) : undefined
@@ -45,6 +45,7 @@ export function ProtoLinks() {
 
   const worldOf = (e: React.PointerEvent) => {
     const r = stageRef.current!.getBoundingClientRect()
+    const camera = viewport.get()
     return { x: (e.clientX - r.left - camera.x) / camera.z, y: (e.clientY - r.top - camera.y) / camera.z }
   }
   const dropOn = (p: { x: number; y: number }) => [...frames].reverse().find((f) => f.id !== picked?.id && p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h)

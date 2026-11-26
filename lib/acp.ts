@@ -1,11 +1,6 @@
-export const ACP_AGENTS = [
-  { id: 'codex', name: 'Codex', executable: 'codex-acp', args: [], bundled: true },
-  { id: 'claude', name: 'Claude', executable: 'claude-agent-acp', args: [], bundled: true },
-  { id: 'cursor', name: 'Cursor', executable: 'agent', args: ['acp'], bundled: false },
-  { id: 'gemini', name: 'Gemini CLI', executable: 'gemini', args: ['--acp'], bundled: false },
-  { id: 'copilot', name: 'GitHub Copilot', executable: 'copilot', args: ['--acp'], bundled: false },
-  { id: 'opencode', name: 'OpenCode', executable: 'opencode', args: ['acp'], bundled: false },
-] as const
+import { ACP_AGENTS } from '../packages/cli/agents.mjs'
+
+export { ACP_AGENTS }
 
 export type AcpAgentId = typeof ACP_AGENTS[number]['id']
 export type AcpSettings = Record<string, string | boolean>

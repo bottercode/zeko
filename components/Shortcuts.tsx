@@ -20,6 +20,7 @@ const GROUPS: { title: string; keys: [string, string[]][] }[] = [
       ...(LIVE_FRAMES ? ([['Add a live frame', ['A']]] as [string, string[]][]) : []),
       ['Add a sketch', ['S']],
       ['Make a variant', ['⌘', 'D']],
+      ['Drag without snapping', ['Alt', 'drag']],
       ...(LIVE_FRAMES ? ([['Use a live page', ['↵']]] as [string, string[]][]) : []),
       ['Edit a sketch’s contents', ['↵']],
       ['Delete', ['⌫']],

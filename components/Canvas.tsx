@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Circle, Frame as FrameIcon, Globe, Hand, LayoutGrid, Maximize, MessageCircle, Minus, MousePointer2, PanelLeftOpen, PenLine, PenTool, PencilRuler, Plus, Radio, Route, Square, SquareDashedMousePointer, Type } from 'lucide-react'
 import { AGENT_AWAY_MS, deckFront, visibleFrames } from '@/lib/ops'
 import { FrameCard } from './FrameCard'
 import { LIVE_FRAMES } from '@/lib/features'
-import { CHROME, isDrawTool, useStudio, type Tool } from './studio-context'
+import { CHROME, isDrawTool, useCameraZoom, useStudio, type Tool } from './studio-context'
 import { Button, IconButton, Tip } from './kit'
 import { Separator } from './ui/separator'
 import { AcpConnection } from './AcpConnection'
@@ -16,7 +16,9 @@ const MIN_ZOOM = 0.05
 const MAX_ZOOM = 4
 
 export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { leftInset: number; rightInset: number; railLeft: number; onShowLayers?: () => void }) {
-  const { board, pageId, camera, now, setCamera, stageRef, tool, select, selection, setDraft, setOpenThread, setInteractId, openMenu, addFrame, openWebsite, dispatch, fit, toast, prototype, playerOpen } = useStudio()
+  const { board, pageId, viewport, now, setCamera, stageRef, tool, select, selection, setDraft, setOpenThread, setInteractId, openMenu, addFrame, openWebsite, dispatch, fit, toast, prototype, playerOpen } = useStudio()
+  const worldRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
   const [spaceDown, setSpaceDown] = useState(false)
   // Holding Z zooms: click in, Alt-click out, or drag a box to zoom onto.
   const [zoomHeld, setZoomHeld] = useState(false)
@@ -25,6 +27,25 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
   const pan = useRef<{ sx: number; sy: number; cx: number; cy: number } | null>(null)
   const marquee = useRef<{ sx: number; sy: number; base: string[] } | null>(null)
   const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const frames = useMemo(() => visibleFrames(board, pageId), [board, pageId])
+
+  // Camera motion changes the canvas layers directly. Sidebars and frame surfaces
+  // don't need a React render just because the canvas moved beneath them.
+  useLayoutEffect(() => {
+    const world = worldRef.current
+    const grid = gridRef.current
+    if (!world || !grid) return
+    const paint = () => {
+      const { x, y, z } = viewport.get()
+      let dot = 24 * z
+      while (dot < 12) dot *= 4
+      world.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${z})`
+      grid.style.backgroundSize = `${dot}px ${dot}px`
+      grid.style.transform = `translate(${((x % dot) + dot) % dot}px, ${((y % dot) + dot) % dot}px)`
+    }
+    paint()
+    return viewport.subscribe(paint)
+  }, [viewport])
 
   // Wheel pans; pinch or ⌘/Ctrl + wheel zooms about the pointer.
   useEffect(() => {
@@ -32,8 +53,8 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const rect = el.getBoundingClientRect()
       if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect()
         const px = e.clientX - rect.left
         const py = e.clientY - rect.top
         setCamera((c) => {
@@ -53,7 +74,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
       if (playerOpen) return
       const t = e.target as HTMLElement
       const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
-      if (e.code === 'Space' && !typing) {
+      if (e.code === 'Space' && !typing && !e.defaultPrevented && !t.closest?.('button, a, [role="menu"], [role="dialog"]')) {
         e.preventDefault()
         setSpaceDown(true)
       }
@@ -66,6 +87,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
       if (e.key === 'Alt') setAltDown(false)
     }
     const blur = () => {
+      setSpaceDown(false)
       setZoomHeld(false)
       setAltDown(false)
     }
@@ -86,6 +108,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     if (!handMode && e.button !== 1 && !onBackground) return
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     if (handMode || e.button === 1) {
+      const camera = viewport.get()
       pan.current = { sx: e.clientX, sy: e.clientY, cx: camera.x, cy: camera.y }
       setPanning(true)
       return
@@ -104,6 +127,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     const m = marquee.current
     if (!m || Math.hypot(e.clientX - m.sx, e.clientY - m.sy) < 4) return
     const r = stageRef.current!.getBoundingClientRect()
+    const camera = viewport.get()
     const screen = {
       x: Math.min(m.sx, e.clientX) - r.left,
       y: Math.min(m.sy, e.clientY) - r.top,
@@ -115,7 +139,7 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     const wy = (screen.y - camera.y) / camera.z
     const ww = screen.w / camera.z
     const wh = screen.h / camera.z
-    const hit = visibleFrames(board, pageId)
+    const hit = frames
       .filter((f) => f.x < wx + ww && f.x + f.w > wx && f.y < wy + wh && f.y + f.h > wy)
       .map((f) => f.id)
     select([...new Set([...m.base, ...hit])])
@@ -149,7 +173,6 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     ])
   }
 
-  const frames = visibleFrames(board, pageId)
   const workersByFrame = new Map<string, Set<string>>()
   const markWorking = (name: string, frameId?: string) => {
     if (!frameId) return
@@ -169,10 +192,6 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
     const frameId = agent && agent.lastSeen >= task.updatedAt ? agent.frameId : undefined
     markWorking(task.assignee, frameId ?? task.frameIds[0])
   }
-  // Grid spacing on screen stays between 12 and 48px, so the dots read at every zoom.
-  let dot = 24 * camera.z
-  while (dot < 12) dot *= 4
-
   return (
     <div className="absolute inset-0 overflow-hidden">
       <div
@@ -180,9 +199,6 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
         className="absolute inset-0 select-none"
         style={{
           cursor: handMode ? (panning ? 'grabbing' : 'grab') : tool === 'comment' ? 'crosshair' : 'default',
-          backgroundImage: 'radial-gradient(circle, rgb(255 255 255 / 0.08) 1px, transparent 1.2px)',
-          backgroundSize: `${dot}px ${dot}px`,
-          backgroundPosition: `${camera.x}px ${camera.y}px`,
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -190,15 +206,18 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
         onPointerCancel={endPointer}
         onContextMenu={onContextMenu}
       >
+        <div aria-hidden ref={gridRef} className="pointer-events-none absolute -top-24 -left-24 h-[calc(100%+96px)] w-[calc(100%+96px)] will-change-transform"
+          style={{ backgroundImage: 'radial-gradient(circle, rgb(255 255 255 / 0.08) 1px, transparent 1.2px)' }} />
         <div
+          ref={worldRef}
           data-world=""
-          className="absolute top-0 left-0 origin-top-left"
-          style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})` }}
+          className="absolute top-0 left-0 origin-top-left will-change-transform"
         >
           {frames.map((f) => (
             <FrameCard key={f.deckId ?? f.id} frame={f} panLocked={handMode} workers={workersByFrame.get(f.id)} />
           ))}
           {prototype && <ProtoLinks />}
+          <CanvasGuides />
         </div>
         {box && (
           <div
@@ -212,6 +231,22 @@ export function Canvas({ leftInset, rightInset, railLeft, onShowLayers }: { left
       {frames.length === 0 && !isDrawTool(tool) && <EmptyTable leftInset={leftInset} rightInset={rightInset} />}
       <Tools left={railLeft} onShowLayers={onShowLayers} />
     </div>
+  )
+}
+
+function CanvasGuides() {
+  const { frameGesture } = useStudio()
+  const guides = useSyncExternalStore(frameGesture.subscribe, frameGesture.getGuides, frameGesture.getGuides)
+  if (!guides.length) return null
+  return (
+    <svg aria-hidden className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1}>
+      {guides.map(({ axis, at, from, to }) => (
+        <line key={axis} data-alignment-guide={axis} className="stroke-primary"
+          x1={axis === 'x' ? at : from} y1={axis === 'y' ? at : from}
+          x2={axis === 'x' ? at : to} y2={axis === 'y' ? at : to}
+          strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      ))}
+    </svg>
   )
 }
 
@@ -310,7 +345,8 @@ function Tools({ left, onShowLayers }: { left: number; onShowLayers?: () => void
 }
 
 export function ZoomPill() {
-  const { camera, setCamera, stageRef, fit, playerOpen } = useStudio()
+  const { setCamera, stageRef, fit, playerOpen } = useStudio()
+  const zoom = useCameraZoom()
   const zoomBy = (factor: number) => {
     const r = stageRef.current?.getBoundingClientRect()
     const px = (r?.width ?? 0) / 2
@@ -347,7 +383,7 @@ export function ZoomPill() {
       </IconButton>
       <Tip label="Fit everything" keys={['⇧', '1']} side="top">
         <button onClick={fit} className="editor-control h-8 min-w-12 px-1 text-xs font-medium tabular-nums">
-          {Math.round(camera.z * 100)}%
+          {Math.round(zoom * 100)}%
         </button>
       </Tip>
       <IconButton label="Zoom in" keys={['⌘', '+']} side="top" onClick={() => zoomBy(1.25)}>

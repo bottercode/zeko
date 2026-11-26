@@ -70,7 +70,7 @@ Until Google is configured, the browser uses HTTP Basic with username `zeko` and
 
 ## Agent chat
 
-Choose an agent in the Agents panel and sign in to its local CLI if needed. Zeko bundles the ACP adapters for Codex and Claude. It also finds Cursor, Gemini CLI, GitHub Copilot, and OpenCode when their CLIs are installed on `PATH`.
+Choose an agent in the Agents panel and sign in to its local CLI if needed. Zeko bundles the ACP adapters for Codex and Claude. It also finds Cursor, Gemini CLI, GitHub Copilot, OpenCode, Kimi Code, and Mistral Vibe when their CLIs are installed on `PATH`.
 
 Zeko reads models, thinking effort, and other session settings from the selected agent over ACP. The model picker keeps older versions under **More models** and caches its options between chats. Use **Refresh models** to check the agent again. Replies, thinking, and tool activity update live through the Vercel AI SDK. **Stop reply** cancels the active turn. Chats and their selected settings are saved with the canvas.
 
@@ -84,7 +84,7 @@ npm install -g @botter_code/zeko@latest
 
 If you installed the earlier GitHub release, run `npm uninstall -g @zeko/cli` before installing from npm.
 
-Run `zeko` once and approve it in your browser. The Agents panel shows **CLI connected** when the desktop process is online. Codex and Claude Code run on your computer and use their local sign-in. Chat, model options, and cancellation go through ACP.
+Run `zeko` once and approve it in your browser. The Agents panel shows **CLI connected** when the desktop process is online. Your ACP agents run on your computer using their local sign-in. Chat, model options, and cancellation go through ACP.
 
 Use `zeko status` to check the connection and `zeko stop` to stop the companion. It reconnects while running and the device approval is valid for 30 days. Run `zeko --pair` to approve it again or switch accounts.
 

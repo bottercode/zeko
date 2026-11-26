@@ -1,16 +1,17 @@
 'use client'
 
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { tokenCss, withTokenCss } from '@/lib/tokens'
+import { alignMovingBox, boxAround, type FrameBox } from '@/lib/client/frame-snap'
 import { Braces, Check, ChevronLeft, Download, FileCode, Globe, Link2, PenLine, PencilRuler, ChevronRight, Columns2, Copy, ExternalLink, Layers, MousePointerClick, Scan, Trash2 } from 'lucide-react'
-import { deckMembers, frameSourceUrl } from '@/lib/ops'
+import { deckMembers, frameSourceUrl, visibleFrames } from '@/lib/ops'
 import { agentColor } from '@/lib/client/useBoard'
 import type { Frame } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { STREAM_MARKER, cameFromBridge, registerFrame, sendToFrame, withBridge } from '@/lib/client/bridge'
 import { useFrameActions } from './actions'
 import { FrameComments } from './FrameComments'
-import { useStudio } from './studio-context'
+import { useCameraZoom, useStudio } from './studio-context'
 import { cx, type MenuItem } from './kit'
 
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
@@ -26,24 +27,27 @@ interface Gesture {
   start: Record<string, { x: number; y: number; w: number; h: number }>
   moved: boolean
   inspect?: boolean
+  alignment?: { bounds: FrameBox; neighbors: FrameBox[] }
   last?: Record<string, { x?: number; y?: number; w?: number; h?: number }>
 }
 
 export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLocked: boolean; workers?: ReadonlySet<string> }) {
   const s = useStudio()
-  const { board, camera, overrides, selection, tool, interactId } = s
+  const { board, frameGesture, selection, tool, interactId } = s
+  const zoom = useCameraZoom()
   const gesture = useRef<Gesture | null>(null)
   const previewing = useRef(false)
   const act = useFrameActions()
   const [hovered, setHovered] = useState(false)
 
-  const o = overrides[frame.id] ?? {}
+  const getOverride = () => frameGesture.getOverride(frame.id)
+  const o = useSyncExternalStore(frameGesture.subscribe, getOverride, getOverride) ?? {}
   const box = { x: o.x ?? frame.x, y: o.y ?? frame.y, w: o.w ?? frame.w, h: o.h ?? frame.h }
   const selected = selection.includes(frame.id)
   const interacting = interactId === frame.id
   const members = frame.deckId ? deckMembers(board, frame.deckId) : []
   const position = members.findIndex((m) => m.id === frame.id)
-  const k = 1 / camera.z
+  const k = 1 / zoom
   const labelWidth = box.w / k
   const columns = Math.min(16, Math.max(2, Math.floor(labelWidth / 21)))
   const activityWidth = workers?.size ? columns * 9 + 4 : 0
@@ -57,12 +61,12 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
     }
   }, [canInspect, frame.id])
   useEffect(() => {
-    if (interacting && frame.kind === 'sketch') sendToFrame(frame.id, { type: 'zoom', zoom: camera.z })
-  }, [interacting, frame.kind, frame.id, camera.z])
+    if (interacting && frame.kind === 'sketch') sendToFrame(frame.id, { type: 'zoom', zoom })
+  }, [interacting, frame.kind, frame.id, zoom])
 
   const pointInFrame = (e: React.PointerEvent) => {
     const r = e.currentTarget.getBoundingClientRect()
-    return { x: (e.clientX - r.left) / camera.z, y: (e.clientY - r.top) / camera.z }
+    return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom }
   }
 
   const clearPreview = () => {
@@ -74,7 +78,7 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
   const preview = (e: React.PointerEvent) => {
     if (!canInspect || e.buttons || e.pointerType === 'touch') return
     previewing.current = true
-    sendToFrame(frame.id, { type: 'hover-point', point: pointInFrame(e), zoom: camera.z })
+    sendToFrame(frame.id, { type: 'hover-point', point: pointInFrame(e), zoom })
   }
 
   const beginMove = (e: React.PointerEvent) => {
@@ -109,9 +113,14 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
       const f = board.frames.find((x) => x.id === id)
       if (f) start[id] = { x: f.x, y: f.y, w: f.w, h: f.h }
     }
+    const moving = Object.values(start)
     gesture.current = {
       kind: 'move', sx: e.clientX, sy: e.clientY, start, moved: false,
       inspect: canInspect && selected && selection.length === 1 && !e.shiftKey && !e.metaKey && !e.ctrlKey,
+      alignment: moving.length ? {
+        bounds: boxAround(moving),
+        neighbors: visibleFrames(board, s.pageId).filter((other) => !Object.hasOwn(start, other.id)),
+      } : undefined,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
@@ -126,24 +135,32 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
   const onMove = (e: React.PointerEvent) => {
     const g = gesture.current
     if (!g) return
-    const dx = (e.clientX - g.sx) / camera.z
-    const dy = (e.clientY - g.sy) / camera.z
+    const dx = (e.clientX - g.sx) / zoom
+    const dy = (e.clientY - g.sy) / zoom
     if (!g.moved && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 3) return
     g.moved = true
     const next: Record<string, { x?: number; y?: number; w?: number; h?: number }> = {}
-    for (const [id, b] of Object.entries(g.start)) {
-      if (g.kind === 'move') {
-        next[id] = { x: Math.round(b.x + dx), y: Math.round(b.y + dy) }
-        continue
+    if (g.kind === 'move') {
+      const x = Math.round(dx)
+      const y = Math.round(dy)
+      const alignment = g.alignment && !e.altKey
+        ? alignMovingBox({ ...g.alignment.bounds, x: g.alignment.bounds.x + x, y: g.alignment.bounds.y + y }, g.alignment.neighbors, zoom)
+        : undefined
+      for (const [id, b] of Object.entries(g.start)) {
+        next[id] = { x: b.x + x + (alignment?.dx ?? 0), y: b.y + y + (alignment?.dy ?? 0) }
       }
+      g.last = next
+      frameGesture.set(next, alignment?.guides)
+    } else {
+      const b = g.start[frame.id]!
       const west = g.corner === 'nw' || g.corner === 'sw'
       const north = g.corner === 'nw' || g.corner === 'ne'
       const w = Math.max(frame.shape ? 2 : MIN_W, Math.round(west ? b.w - dx : b.w + dx))
       const h = Math.max(frame.shape ? 2 : MIN_H, Math.round(north ? b.h - dy : b.h + dy))
-      next[id] = { x: west ? b.x + b.w - w : b.x, y: north ? b.y + b.h - h : b.y, w, h }
+      next[frame.id] = { x: west ? b.x + b.w - w : b.x, y: north ? b.y + b.h - h : b.y, w, h }
+      g.last = next
+      frameGesture.set(next)
     }
-    g.last = next
-    s.setOverrides(next)
   }
 
   const onUp = (e: React.PointerEvent) => {
@@ -152,13 +169,15 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
     if (g?.inspect && !g.moved && e.type === 'pointerup' && canInspect) {
       const point = pointInFrame(e)
       act.use(frame)
-      sendToFrame(frame.id, { type: 'pick-point', point, parent: e.altKey, zoom: camera.z })
+      sendToFrame(frame.id, { type: 'pick-point', point, parent: e.altKey, zoom })
       e.currentTarget.parentElement?.querySelector('iframe')?.focus()
       return
     }
     if (!g?.moved || !g.last) return
-    s.dispatch({ type: 'batch', ops: Object.entries(g.last).map(([id, patch]) => ({ type: 'frame.update' as const, id, patch })) })
-    s.setOverrides({})
+    if (e.type === 'pointerup') {
+      s.dispatch({ type: 'batch', ops: Object.entries(g.last).map(([id, patch]) => ({ type: 'frame.update' as const, id, patch })) })
+    }
+    frameGesture.set({})
   }
 
   const onContextMenu = (e: React.MouseEvent) => {
@@ -229,7 +248,8 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
           boxShadow: frame.shape ? (ring ?? undefined) : ring ? `${ring}, var(--shadow-slide)` : 'var(--shadow-slide)',
         }}
       >
-        <FrameSurface frame={frame} appUrl={board.appUrl} bridge interactive={interacting} />
+        <DeferredFrameSurface stageRef={s.stageRef} frame={frame} appUrl={board.appUrl} css={tokenCss(board.design)} interactive={interacting}
+          eager={selected || (s.prototype && frame.kind === 'sketch' && !frame.shape)} />
         {!interacting && (
           <div
             className="absolute inset-0"
@@ -239,6 +259,7 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
             onPointerLeave={clearPreview}
             onPointerUp={onUp}
             onPointerCancel={onUp}
+            onLostPointerCapture={onUp}
             onDoubleClick={() => tool === 'select' && canInteract && act.use(frame)}
           />
         )}
@@ -269,6 +290,7 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
             onPointerMove={onMove}
             onPointerUp={onUp}
             onPointerCancel={onUp}
+            onLostPointerCapture={onUp}
           />
         ))}
       {single && (
@@ -401,9 +423,54 @@ function Label({ frame, members, position, k, selected, interacting, width }: La
   )
 }
 
+const nearViewport = new WeakMap<Element, () => void>()
+const surfaceObservers = new WeakMap<Element, IntersectionObserver>()
+
+const DeferredFrameSurface = memo(function DeferredFrameSurface({ stageRef, frame, appUrl, css, interactive, eager }: {
+  stageRef: RefObject<HTMLDivElement | null>; frame: Frame; appUrl: string; css: string; interactive: boolean; eager: boolean
+}) {
+  const container = useRef<HTMLDivElement>(null)
+  const [seen, setSeen] = useState(eager || interactive)
+  if (!seen && (eager || interactive)) setSeen(true)
+
+  useEffect(() => {
+    const node = container.current
+    const root = stageRef.current
+    if (seen || !node || !root) return
+    if (typeof IntersectionObserver === 'undefined') {
+      const next = requestAnimationFrame(() => setSeen(true))
+      return () => cancelAnimationFrame(next)
+    }
+    let observer = surfaceObservers.get(root)
+    if (!observer) {
+      observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) nearViewport.get(entry.target)?.()
+        }
+      }, { root, rootMargin: '320px' })
+      surfaceObservers.set(root, observer)
+    }
+    nearViewport.set(node, () => setSeen(true))
+    observer.observe(node)
+    return () => {
+      observer.unobserve(node)
+      nearViewport.delete(node)
+    }
+  }, [seen, stageRef])
+
+  // After the first visit, keep the document mounted so panning preserves its state.
+  return (
+    <div ref={container} className="absolute inset-0">
+      {seen && <FrameSurface frame={frame} appUrl={appUrl} css={css} bridge interactive={interactive} />}
+    </div>
+  )
+})
+
 /** What a frame shows: the running app, or a sketch document. */
-export const FrameSurface = memo(function FrameSurface({ frame, appUrl, bridge = false, interactive = false }: { frame: Frame; appUrl: string; bridge?: boolean; interactive?: boolean }) {
-  if (frame.kind === 'sketch') return <SketchSurface key={frame.id} frame={frame} bridge={bridge} />
+export const FrameSurface = memo(function FrameSurface({ frame, appUrl, css, bridge = false, interactive = false }: {
+  frame: Frame; appUrl: string; css: string; bridge?: boolean; interactive?: boolean
+}) {
+  if (frame.kind === 'sketch') return <SketchSurface key={frame.id} frame={frame} css={css} bridge={bridge} interactive={interactive} />
   const src = frameSourceUrl(frame, appUrl)
   if (!src) {
     return (
@@ -441,9 +508,7 @@ function appendedSections(original: string, html: string) {
 }
 
 /** Keep the same iframe when a sketch gains streamed sections or is edited in place. */
-function SketchSurface({ frame, bridge }: { frame: Frame; bridge: boolean }) {
-  const { board, interactId } = useStudio()
-  const css = tokenCss(board.design)
+function SketchSurface({ frame, css, bridge, interactive }: { frame: Frame; css: string; bridge: boolean; interactive: boolean }) {
   const html = frame.html ?? ''
   const ref = useRef<HTMLIFrameElement>(null)
   const [preview, setPreview] = useState(() => ({ seen: html, source: html as string | null, doc: withTokenCss(withBridge(html), css), sections: '' }))
@@ -451,7 +516,7 @@ function SketchSurface({ frame, bridge }: { frame: Frame; bridge: boolean }) {
     if (cameFromBridge(frame.id, html)) {
       setPreview({ ...preview, seen: html, source: null, sections: '' })
     } else {
-      const sections = preview.source !== null && interactId !== frame.id ? appendedSections(preview.source, html) : null
+      const sections = preview.source !== null && !interactive ? appendedSections(preview.source, html) : null
       if (sections && sections.startsWith(preview.sections)) {
         setPreview({ ...preview, seen: html, sections })
       } else {
@@ -459,7 +524,7 @@ function SketchSurface({ frame, bridge }: { frame: Frame; bridge: boolean }) {
       }
     }
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!bridge) return
     registerFrame(frame.id, ref.current?.contentWindow ?? null)
     return () => registerFrame(frame.id, null)
@@ -485,6 +550,7 @@ function SketchSurface({ frame, bridge }: { frame: Frame; bridge: boolean }) {
   return <iframe
     ref={ref}
     title={frame.name}
+    tabIndex={interactive ? 0 : -1}
     srcDoc={bridge ? preview.doc : withTokenCss(html, css)}
     onLoad={() => {
       if (!bridge) return

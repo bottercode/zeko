@@ -10,6 +10,7 @@ import { LIVE_FRAMES } from '@/lib/features'
 import { inspect, screenshot } from '@/lib/server/render'
 import { editLayers, inspectLayers, layerRevision } from '@/lib/server/layers'
 import { MCP_AGENT_HEADER } from '@/lib/auth-access'
+import { DESIGN_BRIEF } from '@/lib/design-brief'
 
 const INSTRUCTIONS = `Zeko is a light table for a product's screens. Each frame is a sketch: a whole HTML
 document you write, labelled with the route and state it stands for.
@@ -39,7 +40,9 @@ How to work:
 4. Prototypes: make an element open another screen with data-zeko-goto="<frame id>" on it, or
    data-zeko-goto="back" to return. The person plays the screens from the board's start screen (flowStart).
    Frames with a "shape" are drawings on the canvas, not screens.
-5. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.`
+5. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.
+
+${DESIGN_BRIEF}`
 
 /* Each request works on one canvas: the one its URL names with ?board=ID, or the one the person opened last. */
 interface CanvasScope {
@@ -412,23 +415,26 @@ const handler = createMcpHandler(
       {
         title: 'Screenshot frame',
         description:
-          'See a sketch frame rendered, as an image. Use it to check your work: spacing, contrast, text that wraps or overflows. full_page captures the whole document instead of only the frame’s size.',
+          'See a rendered sketch. Use JPEG for faster visual review or PNG for a lossless image. full_page captures the whole document instead of only the frame’s size.',
         inputSchema: z.object({
           frame_id: z.string(),
           scale: z.number().min(0.25).max(2).default(1),
           full_page: z.boolean().default(false),
+          format: z.enum(['png', 'jpeg']).default('png'),
         }),
       },
-      async (args: { frame_id: string; scale: number; full_page: boolean }, ctx: Ctx) => {
+      async (args: { frame_id: string; scale: number; full_page: boolean; format: 'png' | 'jpeg' }, ctx: Ctx) => {
         const actor = agentFrom(ctx.http?.req)
         const f = getBoard().frames.find((x) => x.id === args.frame_id)
         if (!f || f.kind !== 'sketch' || f.html === undefined) return fail(`No sketch ${args.frame_id}.`)
         touch(actor, `Checking ${f.name}`, f.id, true)
         try {
-          const png = await screenshot(withDesignTokens(f.html, getBoard().design), { width: f.w, height: f.h, scale: args.scale, fullPage: args.full_page })
+          const image = await screenshot(withDesignTokens(f.html, getBoard().design), {
+            width: f.w, height: f.h, scale: args.scale, fullPage: args.full_page, format: args.format,
+          })
           return {
             content: [
-              { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
+              { type: 'image' as const, data: image.toString('base64'), mimeType: `image/${args.format}` },
               { type: 'text' as const, text: `${f.name}, ${f.w}x${f.h}${args.full_page ? ', full page' : ''}` },
             ],
           }

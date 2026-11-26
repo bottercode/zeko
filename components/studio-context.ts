@@ -1,6 +1,8 @@
 'use client'
 
-import { createContext, useContext, type RefObject } from 'react'
+import { createContext, useContext, useSyncExternalStore, type RefObject } from 'react'
+import { INITIAL_CAMERA, type Camera, type createCamera } from '@/lib/client/camera'
+import type { createFrameGesture } from '@/lib/client/frame-gesture'
 import type { Board, Frame, Op, SketchComponent } from '@/lib/types'
 import type { ElementInfo, Hotspot, LayerNode, ToFrame } from '@/lib/client/bridge'
 import type { MenuItem } from './kit'
@@ -9,12 +11,6 @@ export type DrawTool = 'frame' | 'rect' | 'ellipse' | 'path' | 'text'
 export type Tool = 'select' | 'hand' | 'comment' | DrawTool
 
 export const isDrawTool = (t: Tool): t is DrawTool => t === 'frame' || t === 'rect' || t === 'ellipse' || t === 'path' || t === 'text'
-
-export interface Camera {
-  x: number
-  y: number
-  z: number
-}
 
 export interface Box {
   x: number
@@ -56,16 +52,15 @@ export interface StudioState {
   play: (frameId?: string) => void
   playerOpen: boolean
 
-  camera: Camera
+  viewport: ReturnType<typeof createCamera>
   setCamera: (update: Camera | ((c: Camera) => Camera)) => void
   stageRef: RefObject<HTMLDivElement | null>
   flyTo: (frame: Frame) => void
   showResult: (frames: Frame[]) => void
   fit: () => void
 
-  /** Frames being dragged or resized, drawn from here until the gesture ends. */
-  overrides: Record<string, Partial<Box>>
-  setOverrides: (update: Record<string, Partial<Box>>) => void
+  /** Transient positions and alignment guides while dragging or resizing. */
+  frameGesture: ReturnType<typeof createFrameGesture>
 
   /** The frame being worked inside: a sketch open for element editing, or a live page in use. */
   interactId: string | null
@@ -103,6 +98,16 @@ export function useStudio(): StudioState {
   const ctx = useContext(StudioContext)
   if (!ctx) throw new Error('useStudio outside <Studio>')
   return ctx
+}
+
+export function useCameraZoom() {
+  const { viewport } = useStudio()
+  return useSyncExternalStore(viewport.subscribeZoom, viewport.getZoom, () => INITIAL_CAMERA.z)
+}
+
+export function useCameraSnapshot() {
+  const { viewport } = useStudio()
+  return useSyncExternalStore(viewport.subscribe, viewport.get, () => INITIAL_CAMERA)
 }
 
 export const SIZES: { label: string; w: number; h: number }[] = [

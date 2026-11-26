@@ -3,6 +3,7 @@ import { createUIMessageStream, readUIMessageStream } from 'ai'
 import { nanoid } from 'nanoid'
 import { encode } from 'next-auth/jwt'
 import { ACP_RUN_TOKEN_SALT } from '../auth-access'
+import { DESIGN_BRIEF, designContext } from '../design-brief'
 import { acpAgent, readAcpSelection, type AcpToolActivity } from '../acp'
 import { DEFAULT_CHAT_ID, localAgentProvider } from '../ops'
 import type { Actor, Task } from '../types'
@@ -75,7 +76,8 @@ async function runAgent(
   const current = () => hasBoard(boardId) ? getBoard(boardId).tasks.find((item) => item.id === taskId && item.localRun?.id === runId) : undefined
   const url = new URL('/api/mcp', origin)
   url.search = new URLSearchParams({ board: boardId, as: actor.name, task: taskId, run: runId }).toString()
-  const history = getBoard(boardId).tasks
+  const board = getBoard(boardId)
+  const history = board.tasks
     .filter((item) => item.id !== taskId && item.at <= task.at && item.status === 'done' && (item.chatId ?? DEFAULT_CHAT_ID) === (task.chatId ?? DEFAULT_CHAT_ID))
     .sort((a, b) => b.at - a.at)
     .slice(0, 8)
@@ -83,11 +85,12 @@ async function runAgent(
     .map((item) => ({ message: item.text.slice(0, 1_200), reply: (item.reply || item.summary)?.slice(0, 1_800), frames: item.resultFrameIds?.slice(0, 8) }))
   const prompt = [
     `You are working on Zeko canvas ${JSON.stringify(boardId)}, request ${JSON.stringify(taskId)}.`,
-    'Answer questions directly. For canvas work, read get_board and the relevant frame or guidelines, use the Zeko tools, then call complete_task with the actual result frame IDs and finish with a brief reply.',
-    'If the request names a canvas skill or clearly matches its description in get_board, read it with get_skill and use its instructions.',
+    'Answer questions directly. Start canvas work with the context below. Call get_board when you need other frames, the full guidelines or token set, or updated canvas state. Use the page ID below for new sketches. Call complete_task with the actual result frame IDs and finish with a brief reply.',
+    'If the request names a canvas skill or clearly matches a skill description, read it with get_skill before designing.',
     'For specific text, style, and layout edits, use get_layers and edit_layers. Batch related layer changes with the revision from get_layers and verify the result on the canvas.',
     'For a design, call set_status when you start. Publish the first meaningful section with create_sketch (streaming: true and a <!-- zeko:stream --> marker). Send each next section with append_to_sketch, before that marker, and set done: true on the last one. Put the first version on the canvas before sourcing images or polishing. Do not use shell commands or edit workspace files.',
-    task.frameIds.length ? `Attached frame IDs: ${JSON.stringify(task.frameIds)}.` : '',
+    DESIGN_BRIEF,
+    `Canvas context (read-only snapshot for this request):\n${JSON.stringify(designContext(board, task))}`,
     task.element ? `Selected element: ${JSON.stringify(task.element)}.` : '',
     history.length ? `Earlier chat turns for context: ${JSON.stringify(history)}.` : '',
     `Current request:\n${task.text}`,

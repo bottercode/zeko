@@ -1,4 +1,5 @@
 import { ACP_DEVICE_HEADER, googleAuthConfigured, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
+import { ACP_AGENTS } from '@/lib/acp'
 import { eventStream } from '@/lib/server/events'
 import { receiveAcpOutput, registerAcpDevice, type RelayCommand } from '@/lib/server/acp-relay'
 
@@ -11,8 +12,8 @@ function deviceOf(request: Request) {
 export async function GET(request: Request) {
   const caller = deviceOf(request)
   if (!caller) return new Response(null, { status: 401 })
-  const agents = (new URL(request.url).searchParams.get('agents') ?? '').split(',')
-    .filter((agent): agent is 'claude' | 'codex' => agent === 'claude' || agent === 'codex')
+  const advertised = new Set((new URL(request.url).searchParams.get('agents') ?? '').split(','))
+  const agents = ACP_AGENTS.filter(({ id }) => advertised.has(id)).map(({ id }) => id)
   return eventStream<RelayCommand>(request.signal, () => ({ type: 'ready' }),
     (send) => registerAcpDevice(caller.workspace, caller.device, agents, send), 'ordered')
 }

@@ -1,10 +1,11 @@
 'use client'
 
+import dynamic from 'next/dynamic'
+import { useState } from 'react'
 import {
   Braces, Check, ClipboardCheck, Copy, Download, ExternalLink, Frame as FrameIcon, Globe, History, Info, Link2,
   Layers, MousePointerClick, PanelTop, PencilRuler, Play, Radio, Route, Scan, Shapes, Trash2, Type,
 } from 'lucide-react'
-import { ago } from '@/lib/client/useBoard'
 import { LIVE_FRAMES } from '@/lib/features'
 import { deckMembers, frameSourceUrl, pageStart } from '@/lib/ops'
 import type { Frame, FramePatch } from '@/lib/types'
@@ -19,6 +20,8 @@ import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { SIZES, useStudio } from './studio-context'
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from './ui/dropdown-menu'
+
+const VersionHistoryDialog = dynamic(() => import('./VersionHistoryDialog').then((module) => module.VersionHistoryDialog))
 
 export function FrameInspector() {
   const { board, selection, interactId, element, openShortcuts } = useStudio()
@@ -37,10 +40,11 @@ export function FrameInspector() {
 }
 
 function OneFrame({ frame }: { frame: Frame }) {
-  const { board, pageId, dispatch, select, interactId, setInteractId, now, play, hotspots, openCode, openWebsite, prototype } = useStudio()
+  const { board, pageId, dispatch, select, interactId, setInteractId, play, hotspots, openCode, openWebsite, prototype } = useStudio()
   const act = useFrameActions()
   const members = frame.deckId ? deckMembers(board, frame.deckId) : []
-  const versions = [...(frame.versions ?? [])].reverse()
+  const versions = frame.versions?.length ?? 0
+  const [historyFrameId, setHistoryFrameId] = useState<string | null>(null)
   const isStart = pageStart(board, pageId) === frame.id
   const links = hotspots[frame.id]?.length ?? 0
   const editing = interactId === frame.id
@@ -153,63 +157,60 @@ function OneFrame({ frame }: { frame: Frame }) {
           </div>
         </InspectorSection>
       )}
-      {versions.length > 0 && (
-        <InspectorSection title="Version history" icon={History} summary={versions.length}>
-          <ul className="flex flex-col gap-1">
-            {versions.map((version) => (
-              <li key={version.at} className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-xs text-muted-foreground" title={version.by.name}>{version.by.name} · {ago(version.at, now)}</span>
-                <Button size="sm" variant="ghost" onClick={() => act.restoreVersion(frame, version.at)}>Restore</Button>
-              </li>
-            ))}
-          </ul>
+      {versions > 0 && (
+        <InspectorSection title="Version history" icon={History} summary={versions}>
+          <Button size="sm" variant="outline" className="self-start" onClick={() => setHistoryFrameId(frame.id)}>Browse versions</Button>
         </InspectorSection>
       )}
     </>
   )
 
   return (
-    <InspectorViews
-      initialView={prototype && canPrototype ? 'prototype' : 'layout'}
-      key={`${prototype}:${members.length > 1}`}
-      header={
-        <SelectionHeader
-          name={frame.name}
-          detail={<><Badge variant="secondary">{kind}</Badge><span className="tabular-nums">{frame.w} × {frame.h}</span></>}
-          icon={<FrameType size={17} strokeWidth={1.75} aria-hidden />}
-          actions={
-            <>
-              <IconButton label="Zoom to frame" keys={['⇧', '2']} onClick={() => act.zoomTo(frame)} className="size-7"><Scan aria-hidden /></IconButton>
-              <InspectorMenu label="Frame actions">
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => act.variant(frame)}><Layers aria-hidden /> Make a variant</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => act.duplicate(frame)}><Copy aria-hidden /> Duplicate</DropdownMenuItem>
-                  {frame.kind === 'sketch' && <DropdownMenuItem onClick={() => openCode(frame.id)}><Braces aria-hidden /> Edit HTML</DropdownMenuItem>}
-                  {LIVE_FRAMES && frame.kind === 'live' && act.canOpenInTab(frame) && <DropdownMenuItem onClick={() => act.openInTab(frame)}><ExternalLink aria-hidden /> Open in new tab</DropdownMenuItem>}
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem variant="destructive" onClick={() => act.remove([frame.id])}><Trash2 aria-hidden /> Delete {frame.shape ? 'layer' : 'frame'}</DropdownMenuItem>
-                </DropdownMenuGroup>
-              </InspectorMenu>
-            </>
-          }
-        >
-          {(frame.kind !== 'live' || LIVE_FRAMES) && (
-            <Button variant="secondary" size="sm" className="w-full" onClick={() => editing ? setInteractId(null) : act.use(frame)}>
-              {editing ? <Check data-icon="inline-start" aria-hidden /> : frame.kind !== 'sketch' ? <MousePointerClick data-icon="inline-start" aria-hidden /> : <PencilRuler data-icon="inline-start" aria-hidden />}
-              {editing ? (website ? 'Done browsing' : 'Finish editing') : website ? 'Browse website' : frame.kind === 'live' ? 'Use the page' : 'Edit contents'}
-            </Button>
-          )}
-        </SelectionHeader>
-      }
-      views={[
-        { id: 'layout', label: 'Layout', content: layout },
-        ...(members.length > 1 ? [{ id: 'variants', label: 'Variants', content: variants }] : []),
-        ...(canPrototype ? [{ id: 'prototype', label: 'Prototype', content: prototypeView }] : []),
-        { id: 'details', label: 'Details', content: details },
-      ]}
-    />
+    <>
+      <InspectorViews
+        initialView={prototype && canPrototype ? 'prototype' : 'layout'}
+        key={`${prototype}:${members.length > 1}`}
+        header={
+          <SelectionHeader
+            name={frame.name}
+            detail={<><Badge variant="secondary">{kind}</Badge><span className="tabular-nums">{frame.w} × {frame.h}</span></>}
+            icon={<FrameType size={17} strokeWidth={1.75} aria-hidden />}
+            actions={
+              <>
+                <IconButton label="Zoom to frame" keys={['⇧', '2']} onClick={() => act.zoomTo(frame)} className="size-7"><Scan aria-hidden /></IconButton>
+                <InspectorMenu label="Frame actions">
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={() => act.variant(frame)}><Layers aria-hidden /> Make a variant</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => act.duplicate(frame)}><Copy aria-hidden /> Duplicate</DropdownMenuItem>
+                    {frame.kind === 'sketch' && <DropdownMenuItem onClick={() => openCode(frame.id)}><Braces aria-hidden /> Edit HTML</DropdownMenuItem>}
+                    {versions > 0 && <DropdownMenuItem onClick={() => setHistoryFrameId(frame.id)}><History aria-hidden /> Version history</DropdownMenuItem>}
+                    {LIVE_FRAMES && frame.kind === 'live' && act.canOpenInTab(frame) && <DropdownMenuItem onClick={() => act.openInTab(frame)}><ExternalLink aria-hidden /> Open in new tab</DropdownMenuItem>}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem variant="destructive" onClick={() => act.remove([frame.id])}><Trash2 aria-hidden /> Delete {frame.shape ? 'layer' : 'frame'}</DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </InspectorMenu>
+              </>
+            }
+          >
+            {(frame.kind !== 'live' || LIVE_FRAMES) && (
+              <Button variant="secondary" size="sm" className="w-full" onClick={() => editing ? setInteractId(null) : act.use(frame)}>
+                {editing ? <Check data-icon="inline-start" aria-hidden /> : frame.kind !== 'sketch' ? <MousePointerClick data-icon="inline-start" aria-hidden /> : <PencilRuler data-icon="inline-start" aria-hidden />}
+                {editing ? (website ? 'Done browsing' : 'Finish editing') : website ? 'Browse website' : frame.kind === 'live' ? 'Use the page' : 'Edit contents'}
+              </Button>
+            )}
+          </SelectionHeader>
+        }
+        views={[
+          { id: 'layout', label: 'Layout', content: layout },
+          ...(members.length > 1 ? [{ id: 'variants', label: 'Variants', content: variants }] : []),
+          ...(canPrototype ? [{ id: 'prototype', label: 'Prototype', content: prototypeView }] : []),
+          { id: 'details', label: 'Details', content: details },
+        ]}
+      />
+      {historyFrameId === frame.id && <VersionHistoryDialog frame={frame} onClose={() => setHistoryFrameId(null)} />}
+    </>
   )
 }
 

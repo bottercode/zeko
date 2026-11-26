@@ -1,28 +1,32 @@
 'use client'
 
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { boardPages, deckMembers, framePage, pageStart, parseWebsiteUrl, taskResultFrames, visibleFrames } from '@/lib/ops'
 import { newId, useBoard, useNow } from '@/lib/client/useBoard'
 import { imageSketch, isBoardImage } from '@/lib/client/images'
+import { createCamera, INITIAL_CAMERA, type Camera } from '@/lib/client/camera'
+import { createFrameGesture } from '@/lib/client/frame-gesture'
 import { frameIdOf, noteBridgeHtml, sendToFrame, type ElementInfo, type Hotspot, type LayerNode, type ToFrame } from '@/lib/client/bridge'
 import type { Frame, Op, SketchComponent } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { Canvas, ZoomPill } from './Canvas'
 import { GettingStarted } from './GettingStarted'
-import { Loupe } from './Loupe'
 import { LeftPanel } from './LeftPanel'
-import { Player } from './Player'
-import { SearchDialog } from './SearchDialog'
-import { ShortcutsDialog } from './Shortcuts'
 import { DesignPanel, SidePanel } from './SidePanel'
-import { SketchCodeDialog } from './SketchCodeDialog'
-import { WebsiteDialog } from './WebsiteDialog'
 import { Mark } from './Mark'
 import { TopBar } from './TopBar'
 import { ConfirmDialog, Menu, ToastProvider, useToast, type MenuItem } from './kit'
 import { useFrameActions } from './actions'
-import { CHROME, LEFT_PANEL_WIDTH, SIDE_PANEL, StudioContext, useStudio, type Box, type Camera, type Draft, type StudioState, type Tool } from './studio-context'
+import { CHROME, LEFT_PANEL_WIDTH, SIDE_PANEL, StudioContext, useStudio, type Box, type Draft, type StudioState, type Tool } from './studio-context'
+
+const Loupe = dynamic(() => import('./Loupe').then((module) => module.Loupe))
+const Player = dynamic(() => import('./Player').then((module) => module.Player))
+const SearchDialog = dynamic(() => import('./SearchDialog').then((module) => module.SearchDialog))
+const ShortcutsDialog = dynamic(() => import('./Shortcuts').then((module) => module.ShortcutsDialog))
+const SketchCodeDialog = dynamic(() => import('./SketchCodeDialog').then((module) => module.SketchCodeDialog))
+const WebsiteDialog = dynamic(() => import('./WebsiteDialog').then((module) => module.WebsiteDialog))
 
 const BLANK_SKETCH = `<!doctype html><html><head><style>
   body{margin:0;font-family:ui-sans-serif,system-ui,sans-serif;display:grid;place-items:center;height:100vh;background:#fff;color:#68717b}
@@ -113,8 +117,8 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const [hotspots, setHotspots] = useState<Record<string, Hotspot[]>>({})
   const [playing, setPlaying] = useState<string | null>(null)
   const playerOpen = playing !== null
-  const [camera, setCameraState] = useState<Camera>({ x: 80, y: 80, z: 0.4 })
-  const [overrides, setOverrides] = useState<Record<string, Partial<Box>>>({})
+  const [camera] = useState(createCamera)
+  const [frameGesture] = useState(createFrameGesture)
   const [interactId, setInteractId] = useState<string | null>(null)
   const [layers, setLayers] = useState<LayerNode[] | null>(null)
   const [pickedElement, setPickedElement] = useState<{ frameId: string; info: ElementInfo } | null>(null)
@@ -153,29 +157,26 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const autoFit = useRef<{ taskId?: string; firstFrameShown?: boolean } | null>({})
 
   // The camera can be set at once (wheel, drag) or glide to a target (fit, jump to a frame).
-  const cameraRef = useRef(camera)
-  useEffect(() => {
-    cameraRef.current = camera
-  }, [camera])
   const glideFrame = useRef(0)
+  useEffect(() => () => cancelAnimationFrame(glideFrame.current), [])
   const setCamera = useCallback((update: Camera | ((c: Camera) => Camera)) => {
     autoFit.current = null
     cancelAnimationFrame(glideFrame.current)
-    setCameraState(update)
-  }, [])
+    camera.set(update)
+  }, [camera])
   const glide = useCallback((to: Camera) => {
     cancelAnimationFrame(glideFrame.current)
-    if (reducedMotion()) return setCameraState(to)
-    const from = cameraRef.current
+    if (reducedMotion()) return camera.set(to)
+    const from = camera.get()
     const t0 = performance.now()
     const step = (t: number) => {
       const p = Math.min(1, (t - t0) / 380)
       const e = 1 - Math.pow(1 - p, 4)
-      setCameraState({ x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, z: from.z * Math.pow(to.z / from.z, e) })
+      camera.set({ x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, z: from.z * Math.pow(to.z / from.z, e) })
       if (p < 1) glideFrame.current = requestAnimationFrame(step)
     }
     glideFrame.current = requestAnimationFrame(step)
-  }, [])
+  }, [camera])
 
   const stageSize = useCallback(() => {
     const r = stageRef.current?.getBoundingClientRect()
@@ -199,10 +200,10 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         autoFit.current = null
         glide(target)
       } else {
-        setCameraState(target)
+        camera.set(target)
       }
     },
-    [stageSize, leftInset, rightInset, glide],
+    [stageSize, leftInset, rightInset, glide, camera],
   )
 
   const fit = useCallback(() => {
@@ -226,8 +227,9 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
     setInteractId(null)
     setDraft(null)
     setOpenThread(null)
-    setCameraState({ x: 80, y: 80, z: 0.4 })
-  }, [setOpenThread])
+    frameGesture.set({})
+    camera.set(INITIAL_CAMERA)
+  }, [camera, frameGesture, setOpenThread])
 
   useEffect(() => {
     const pending = autoFit.current
@@ -311,8 +313,9 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       const { w, h } = stageSize()
       const cx = leftInset + (w - leftInset - rightInset) / 2
       const cy = CHROME.top + (h - CHROME.top - CHROME.bottom) / 2
-      const x = Math.round((cx - camera.x) / camera.z - size.w / 2)
-      const y = Math.round((cy - camera.y) / camera.z - size.h / 2)
+      const view = camera.get()
+      const x = Math.round((cx - view.x) / view.z - size.w / 2)
+      const y = Math.round((cy - view.y) / view.z - size.h / 2)
       const id = newId()
       const frame = { id, pageId, ...content, x, y, ...size }
       dispatch({ type: 'frame.create', frame })
@@ -347,7 +350,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
     if (!images.length) return
 
     const { w, h } = stageSize()
-    const view = cameraRef.current
+    const view = camera.get()
     const centerX = (leftInset + (w - leftInset - rightInset) / 2 - view.x) / view.z
     const centerY = (CHROME.top + (h - CHROME.top - CHROME.bottom) / 2 - view.y) / view.z
     const rowWidth = images.reduce((width, image) => width + image.w, 48 * (images.length - 1))
@@ -362,7 +365,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       select(frames.map((frame) => frame.id))
       fitBoxes(frames, 1)
     }
-  }, [pageId, stageSize, leftInset, rightInset, dispatch, select, fitBoxes, toast])
+  }, [camera, pageId, stageSize, leftInset, rightInset, dispatch, select, fitBoxes, toast])
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -436,7 +439,10 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         case 'history':
           return m.redo ? historyRef.current.redo() : historyRef.current.undo()
         case 'hotspots':
-          setHotspots((h) => ({ ...h, [id]: m.items }))
+          setHotspots((h) => {
+            if (!m.items.length && !h[id]?.length) return h
+            return { ...h, [id]: m.items }
+          })
           return
       }
     }
@@ -494,14 +500,13 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         hotspots,
         play,
         playerOpen,
-        camera,
+        viewport: camera,
         setCamera,
         stageRef,
         flyTo,
         showResult,
         fit,
-        overrides,
-        setOverrides,
+        frameGesture,
         interactId,
         setInteractId,
         layers,
@@ -528,7 +533,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         openMenu,
         confirm,
       },
-    [boardId, board, pageId, switchPage, dispatch, undo, redo, history, now, selection, select, toggle, tool, setTool, prototype, hotspots, play, playerOpen, camera, setCamera, flyTo, showResult, fit, overrides, interactId, layers, element, toFrame, draft, openThread, threadInPanel, setOpenThread, openLoupe, addFrame, openWebsite, saveComponent, toast, openMenu, confirm],
+    [boardId, board, pageId, switchPage, dispatch, undo, redo, history, now, selection, select, toggle, tool, setTool, prototype, hotspots, play, playerOpen, camera, setCamera, flyTo, showResult, fit, frameGesture, interactId, layers, element, toFrame, draft, openThread, threadInPanel, setOpenThread, openLoupe, addFrame, openWebsite, saveComponent, toast, openMenu, confirm],
   )
 
   if (!value) {

@@ -81,13 +81,20 @@ export interface ShotOptions {
   scale?: number
   /** capture the whole document, not only the frame's size */
   fullPage?: boolean
+  format?: 'png' | 'jpeg'
 }
 
 export async function screenshot(html: string, o: ShotOptions): Promise<Buffer> {
   const scale = Math.min(3, Math.max(0.25, o.scale ?? 1))
   return withPage(html, o.width, o.height, scale, async (page) => {
-    const png = await page.screenshot({ type: 'png', fullPage: !!o.fullPage, captureBeyondViewport: !!o.fullPage })
-    return Buffer.from(png)
+    const format = o.format ?? 'png'
+    const image = await page.screenshot({
+      type: format,
+      ...(format === 'jpeg' ? { quality: 84 } : {}),
+      fullPage: !!o.fullPage,
+      captureBeyondViewport: !!o.fullPage,
+    })
+    return Buffer.from(image)
   })
 }
 

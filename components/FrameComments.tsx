@@ -6,7 +6,7 @@ import { ago, newId } from '@/lib/client/useBoard'
 import type { Actor, Comment, Frame } from '@/lib/types'
 import { AgentAvatar } from './AgentAvatar'
 import { cx } from './kit'
-import { useStudio } from './studio-context'
+import { useCameraZoom, useStudio } from './studio-context'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { Field, FieldLabel } from './ui/field'
@@ -28,8 +28,8 @@ function Face({ actor, size = 20 }: { actor: Actor; size?: number }) {
 
 /** Pins, the new-comment box and an open thread, drawn at screen size over a frame. */
 export function FrameComments({ frame }: { frame: Frame }) {
-  const { board, camera, draft, openThread, threadInPanel, setOpenThread } = useStudio()
-  const k = 1 / camera.z
+  const { board, draft, openThread, threadInPanel, setOpenThread } = useStudio()
+  const k = 1 / useCameraZoom()
   const comments = board.comments.filter((c) => c.frameId === frame.id && (!c.resolved || c.id === openThread))
 
   return (
