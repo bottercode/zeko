@@ -35,6 +35,8 @@ export interface Frame {
   sheetRoute?: string
   /** frames sharing a deck id are variants of one another */
   deckId?: string
+  /** the variant this one branched from, so a deck's alternates read as a tree */
+  variantOf?: string
   /** set on the main copy of a component: editing this frame updates every instance */
   componentId?: string
   /** set on a capture of the implemented page: the design frame it builds */

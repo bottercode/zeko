@@ -16,7 +16,7 @@ const frame = z.object({
   pageId: id.optional(), approved: z.boolean().optional(), reference: z.boolean().optional(),
   url: z.string().optional(), html: z.string().optional(), route: z.string().optional(),
   state: z.string().optional(), shape: z.enum(['rect', 'ellipse', 'path', 'text']).optional(),
-  sheetRoute: z.string().optional(), deckId: id.optional(),
+  sheetRoute: z.string().optional(), deckId: id.optional(), variantOf: id.optional(),
   componentId: id.optional(), buildOf: id.optional(), buildUrl: z.string().optional(),
   drift: z.object({
     checkedAt: time, designAt: time, matched: z.number().default(0),

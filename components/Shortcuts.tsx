@@ -33,6 +33,7 @@ const GROUPS: { title: string; keys: [string, string[]][] }[] = [
       ['Previous or next variant', ['←', '→']],
       ['Keep this variant', ['K']],
       ['Compare in the loupe', ['L']],
+      ['Alternates as a tree', ['B']],
     ],
   },
   {
@@ -41,6 +42,7 @@ const GROUPS: { title: string; keys: [string, string[]][] }[] = [
       ['Search the board', ['⌘', 'K']],
       ['Fit everything', ['⇧', '1']],
       ['Zoom to selection', ['⇧', '2']],
+      ['State map', ['M']],
       ['Zoom', ['⌘', 'scroll']],
       ['Undo', ['⌘', 'Z']],
       ['Redo', ['⇧', '⌘', 'Z']],

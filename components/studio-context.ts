@@ -84,6 +84,10 @@ export interface StudioState {
   addFrame: (kind: 'live' | 'sketch', component?: SketchComponent) => void
   openWebsite: (frameId?: string) => void
   openCode: (frameId: string) => void
+  /** Shows a frame's alternates as a tree: pick, keep, or ask for more. */
+  openAlternates: (frameId: string) => void
+  /** Shows the page's screens and states as a map along its prototype links. */
+  openStateMap: () => void
   saveComponent: (path: string) => void
   /** Opens a component's main copy on the canvas, creating it if needed. */
   editComponent: (component: SketchComponent) => void

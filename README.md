@@ -68,6 +68,21 @@ Google sign-in saves the user's profile and latest sign-in time in `zeko.users` 
 
 Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. Hosted MCP clients sign in through the browser with the same Google workspace. The hosted database role needs SELECT, INSERT, and DELETE on `zeko.mcp_oauth_grants`. Existing Basic-auth MCP credentials point to the original workspace.
 
+## Alternates
+
+Explore several directions for one screen without losing any. Select a frame and press **B** (or **Alternates** in the
+top bar) to see its versions as a tree: the original at the top, and each alternate under the one it branched from.
+Click a version to show it on the canvas, **Branch** to ask your agent for more versions from it (optionally with a
+direction, such as "denser" or "a sidebar layout"), and **Keep only** to settle on one. Agents make alternates with
+`create_sketch` and `variant_of`.
+
+## State map
+
+Press **M** (or **State map** in the top bar) to see every screen and state on the page, laid out from the start
+screen along the prototype's links. Screens with a route usually need loading, empty and error states too; the map
+lists the ones missing, and **Design with agent** asks your agent to make them from the screen's default state.
+Agents read the same map with `get_state_map`.
+
 ## Design drift
 
 Check that what got built matches what was designed. Select a design sketch, open **Details → Build**, and enter

@@ -23,6 +23,8 @@ import { useFrameActions } from './actions'
 import { CHROME, LEFT_PANEL_WIDTH, SIDE_PANEL, StudioContext, useStudio, type Box, type Draft, type StudioState, type Tool } from './studio-context'
 
 const Loupe = dynamic(() => import('./Loupe').then((module) => module.Loupe))
+const Alternates = dynamic(() => import('./Alternates').then((module) => module.Alternates))
+const StateMapView = dynamic(() => import('./StateMap').then((module) => module.StateMapView))
 const Player = dynamic(() => import('./Player').then((module) => module.Player))
 const SearchDialog = dynamic(() => import('./SearchDialog').then((module) => module.SearchDialog))
 const ShortcutsDialog = dynamic(() => import('./Shortcuts').then((module) => module.ShortcutsDialog))
@@ -147,6 +149,8 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [codeFrameId, setCodeFrameId] = useState<string | null>(null)
+  const [alternatesId, setAlternatesId] = useState<string | null>(null)
+  const [stateMapOpen, setStateMapOpen] = useState(false)
   const codeFrame = board?.frames.find((frame) => frame.id === codeFrameId && frame.kind === 'sketch')
   const [websiteEditor, setWebsiteEditor] = useState<{ frameId?: string } | null>(null)
   const websiteFrame = board?.frames.find((frame) => frame.id === websiteEditor?.frameId && frame.kind === 'website')
@@ -154,7 +158,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const openWebsite = useCallback((frameId?: string) => setWebsiteEditor({ frameId }), [])
   const [menu, setMenu] = useState<{ x: number; y: number; items: (MenuItem | 'divider')[] } | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
-  const overlayOpen = !!menu || !!confirmState || !!codeFrame || websiteEditorOpen || shortcutsOpen || connectOpen || searchOpen || playerOpen
+  const overlayOpen = !!menu || !!confirmState || !!codeFrame || websiteEditorOpen || shortcutsOpen || connectOpen || searchOpen || playerOpen || !!alternatesId || stateMapOpen
   const autoFit = useRef<{ taskId?: string; firstFrameShown?: boolean } | null>({})
 
   // The camera can be set at once (wheel, drag) or glide to a target (fit, jump to a frame).
@@ -547,6 +551,8 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         addFrame,
         openWebsite,
         openCode: setCodeFrameId,
+        openAlternates: setAlternatesId,
+        openStateMap: () => setStateMapOpen(true),
         saveComponent,
         editComponent,
         insertHtml,
@@ -617,6 +623,8 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       {loupe && <Loupe ids={loupe} onClose={() => setLoupe(null)} onSwap={() => setLoupe([loupe[1], loupe[0]])} />}
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} />}
+      {alternatesId && <Alternates frameId={alternatesId} onClose={() => setAlternatesId(null)} />}
+      {stateMapOpen && <StateMapView onClose={() => setStateMapOpen(false)} />}
       {codeFrame && <SketchCodeDialog key={codeFrame.id} frame={codeFrame} onClose={() => setCodeFrameId(null)} />}
       {websiteEditorOpen && <WebsiteDialog key={websiteFrame?.id ?? 'new'} address={websiteFrame?.url ?? (websiteFrame ? '' : undefined)} onSave={saveWebsite} onClose={() => setWebsiteEditor(null)} />}
       {playing && <Player board={board!} start={playing} onClose={() => setPlaying(null)} />}
@@ -716,6 +724,11 @@ function Keys({
           return s.addFrame('sketch')
         case 'l':
           return s.openLoupe()
+        case 'b':
+          if (single && single.kind !== 'website' && !single.shape && !single.buildOf) s.openAlternates(single.id)
+          return
+        case 'm':
+          return s.openStateMap()
         case 'k':
           if (single?.deckId) act.keep(single)
           return

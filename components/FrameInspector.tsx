@@ -2,10 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useState } from 'react'
-import {
-  Braces, Camera, Check, ClipboardCheck, Code2, Copy, Download, ExternalLink, FileCode, Frame as FrameIcon, Globe, History, Info, Link2, Palette,
-  Layers, MousePointerClick, PanelTop, PencilRuler, Play, Radio, Route, Scan, Shapes, Trash2, Type,
-} from 'lucide-react'
+import { Braces, Camera, Check, ClipboardCheck, Code2, Copy, Download, ExternalLink, FileCode, Frame as FrameIcon, GitBranch, Globe, History, Info, Layers, Link2, MousePointerClick, Palette, PanelTop, PencilRuler, Play, Radio, Route, Scan, Shapes, Trash2, Type } from 'lucide-react'
 import { LIVE_FRAMES } from '@/lib/features'
 import { deckMembers, frameSourceUrl, pageStart } from '@/lib/ops'
 import type { Frame, FramePatch } from '@/lib/types'
@@ -41,7 +38,7 @@ export function FrameInspector() {
 }
 
 function OneFrame({ frame }: { frame: Frame }) {
-  const { board, pageId, dispatch, select, interactId, setInteractId, play, hotspots, openCode, openWebsite, prototype } = useStudio()
+  const { board, pageId, dispatch, select, interactId, setInteractId, play, hotspots, openCode, openWebsite, openAlternates, prototype } = useStudio()
   const act = useFrameActions()
   const members = frame.deckId ? deckMembers(board, frame.deckId) : []
   const versions = frame.versions?.length ?? 0
@@ -134,6 +131,7 @@ function OneFrame({ frame }: { frame: Frame }) {
       <div className="flex flex-wrap gap-1.5">
         <Button size="sm" variant="secondary" onClick={() => act.keep(frame)}><Check data-icon="inline-start" aria-hidden /> Keep this variant</Button>
         <Button size="sm" variant="outline" onClick={() => act.compare(frame)}>Compare</Button>
+        <Button size="sm" variant="ghost" onClick={() => openAlternates(frame.id)}><GitBranch data-icon="inline-start" aria-hidden /> See as tree</Button>
       </div>
     </InspectorSection>
   )
@@ -201,6 +199,7 @@ function OneFrame({ frame }: { frame: Frame }) {
                 <InspectorMenu label="Frame actions">
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => act.variant(frame)}><Layers aria-hidden /> Make a variant</DropdownMenuItem>
+                    {frame.kind !== 'website' && !frame.shape && !frame.buildOf && <DropdownMenuItem onClick={() => openAlternates(frame.id)}><GitBranch aria-hidden /> {members.length > 1 ? 'Alternates' : 'Explore alternates'}</DropdownMenuItem>}
                     <DropdownMenuItem onClick={() => act.duplicate(frame)}><Copy aria-hidden /> Duplicate</DropdownMenuItem>
                     {frame.kind === 'sketch' && <DropdownMenuItem onClick={() => openCode(frame.id)}><Braces aria-hidden /> Edit HTML</DropdownMenuItem>}
                     {versions > 0 && <DropdownMenuItem onClick={() => setHistoryFrameId(frame.id)}><History aria-hidden /> Version history</DropdownMenuItem>}

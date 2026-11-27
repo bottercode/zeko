@@ -3,7 +3,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { tokenCss, withTokenCss } from '@/lib/tokens'
 import { alignMovingBox, boxAround, type FrameBox } from '@/lib/client/frame-snap'
-import { Braces, Camera, Check, ChevronLeft, Code2, Download, FileCode, Globe, Link2, PenLine, PencilRuler, ChevronRight, Columns2, Copy, ExternalLink, Layers, MousePointerClick, Scan, Trash2 } from 'lucide-react'
+import { Braces, Camera, Check, ChevronLeft, Code2, Download, FileCode, Globe, Link2, PenLine, PencilRuler, ChevronRight, Columns2, Copy, ExternalLink, GitBranch, Layers, MousePointerClick, Scan, Trash2 } from 'lucide-react'
 import { deckMembers, frameSourceUrl, visibleFrames } from '@/lib/ops'
 import { agentColor } from '@/lib/client/useBoard'
 import type { Frame } from '@/lib/types'
@@ -205,6 +205,7 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
     )
     items.push(
       { label: 'Make a variant', icon: <Layers size={14} />, keys: ['⌘', 'D'], onSelect: () => act.variant(frame) },
+      ...(frame.kind !== 'website' && !frame.shape && !frame.buildOf ? [{ label: members.length > 1 ? 'Alternates' : 'Explore alternates', icon: <GitBranch size={14} />, keys: ['B'], onSelect: () => s.openAlternates(frame.id) }] : []),
       { label: 'Duplicate', icon: <Copy size={14} />, onSelect: () => act.duplicate(frame) },
     )
     if (members.length > 1) {

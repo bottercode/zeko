@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { imageAccept, isBoardImage } from '@/lib/client/images'
-import { Check, CloudOff, Columns2, Download, Ellipsis, LayoutGrid, Link2, LoaderCircle, Play, Plug, Redo2, Search, Undo2, Upload, type LucideIcon } from 'lucide-react'
+import { Check, CloudOff, Columns2, Download, Ellipsis, GitBranch, LayoutGrid, Link2, LoaderCircle, Play, Plug, Redo2, Search, Undo2, Upload, Waypoints, type LucideIcon } from 'lucide-react'
 import { agentIsOnline } from '@/lib/ops'
 import type { Connection, SaveState } from '@/lib/client/useBoard'
 import type { AgentPresence } from '@/lib/types'
@@ -46,7 +46,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
   connection: Connection; saveState: SaveState; onImport: (json: string) => Promise<string | null>; placeImages: (files: File[]) => Promise<void>;
   connectOpen: boolean; onConnectOpenChange: (open: boolean) => void
 }) {
-  const { boardId, board, pageId, dispatch, selection, openLoupe, openSearch, confirm, toast, fit, undo, redo, history, now, play } = useStudio()
+  const { boardId, board, pageId, dispatch, selection, openLoupe, openSearch, openAlternates, openStateMap, confirm, toast, fit, undo, redo, history, now, play } = useStudio()
   const [address, setAddress] = useState(board.appUrl)
   const [seen, setSeen] = useState(board.appUrl)
   const fileInputId = useId()
@@ -58,6 +58,8 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
   const agents = Object.values(board.agents).filter((a) => agentIsOnline(a, now)).sort((a, b) => b.lastSeen - a.lastSeen)
   const singleInDeck = selection.length === 1 && !!board.frames.find((f) => f.id === selection[0])?.deckId
   const canCompare = selection.length === 2 || singleInDeck
+  const one = selection.length === 1 ? board.frames.find((f) => f.id === selection[0]) : undefined
+  const canBranch = !!one && one.kind !== 'website' && !one.shape && !one.buildOf
 
   const arrange = () => {
     dispatch({ type: 'sheet.arrange', pageId })
@@ -103,6 +105,8 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
     [
       { label: 'Arrange', hint: 'One row per route, states left to right', Icon: LayoutGrid, run: arrange },
       { label: 'Compare', hint: canCompare ? 'Compare in the loupe' : 'Select two frames, or one in a deck', keys: canCompare ? ['L'] : undefined, Icon: Columns2, run: () => openLoupe(), disabled: !canCompare },
+      { label: 'Alternates', hint: canBranch ? 'See and branch versions of this frame' : 'Select one frame', keys: canBranch ? ['B'] : undefined, Icon: GitBranch, run: () => one && openAlternates(one.id), disabled: !canBranch },
+      { label: 'State map', hint: 'Screens and states along the prototype links', keys: ['M'], Icon: Waypoints, run: openStateMap },
     ],
     [
       { label: 'Import', hint: 'Import a board or place images', Icon: Upload, run: () => document.getElementById(fileInputId)?.click() },

@@ -218,8 +218,8 @@ function arrange(board: Board, pageId: string, actor: Actor, now: number) {
   }
 }
 
-const STATE_ORDER = ['default', 'loading', 'empty', 'error', 'success']
-function stateRank(state?: string) {
+export const STATE_ORDER = ['default', 'loading', 'empty', 'error', 'success']
+export function stateRank(state?: string) {
   const i = STATE_ORDER.indexOf((state ?? 'default').toLowerCase())
   return i === -1 ? STATE_ORDER.length : i
 }
@@ -459,6 +459,7 @@ export function applyOp(input: Board, op: Op, actor: Actor): Board {
         approved: undefined,
         reference: undefined,
         ...patch,
+        variantOf: source.id,
         x: source.x,
         y: source.y,
         w: source.w,

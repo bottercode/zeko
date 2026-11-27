@@ -52,6 +52,7 @@ export function useFrameActions() {
   }
 
   return {
+    askAgent,
     variant(frame: Frame) {
       const id = newId()
       dispatch({ type: 'frame.variant', id: frame.id, newId: id })

@@ -17,6 +17,7 @@ import { codeNotes, frameCode } from '@/lib/code'
 import { captureBuild } from '@/lib/server/drift'
 import { openDrift } from '@/lib/drift'
 import { MCP_AGENT_HEADER } from '@/lib/auth-access'
+import { stateMap } from '@/lib/state-map'
 import { DESIGN_BRIEF } from '@/lib/design-brief'
 
 const INSTRUCTIONS = `Zeko is a light table for a product's screens. Each frame is a sketch: a whole HTML
@@ -40,13 +41,16 @@ How to work:
    <!-- zeko:stream --> where the next section belongs. Call append_to_sketch with before set to that marker
    and one complete section at a time. Set done: true on the last section. Add or refine imagery after the
    layout is visible. For a redesign, use variant_of to add the draft to the existing frame's deck.
+   When asked for alternates, make each one with create_sketch and variant_of set to the frame it branches from,
+   named after its idea; the person sees them as a tree and keeps one.
    Then look at what you made: screenshot_frame shows it rendered, inspect_frame lists element boxes, fonts,
    colors and whether the content overflows the frame. Fix what looks wrong before you report back.
    fit_frame_to_content sets the frame's height to the page's height. Every edit keeps the previous version,
    so list_versions and restore_version can undo a wrong turn.
 4. Prototypes: make an element open another screen with data-zeko-goto="<frame id>" on it, or
    data-zeko-goto="back" to return. The person plays the screens from the board's start screen (flowStart).
-   Frames with a "shape" are drawings on the canvas, not screens.
+   Frames with a "shape" are drawings on the canvas, not screens. get_state_map shows every screen and state of a
+   page along its links, and which loading, empty and error states routed screens still lack.
 5. Images and drawings: Zeko makes none itself. Draw icons, illustrations and logos as SVG yourself and add them with
    place_svg. Make or find images with your own tools, then add them with place_image (a data URL or https address);
    to rework one, get_image shows you the current picture. Prefer real assets to placeholder boxes. add_shader adds an animated layer (mesh gradient, liquid, grain gradient,
@@ -153,7 +157,7 @@ function summarizeFrame(board: Board, f: Frame) {
     size: `${f.w}x${f.h}`,
     position: { x: f.x, y: f.y },
     url: frameSourceUrl(f, board.appUrl),
-    deck: f.deckId ? { id: f.deckId, variants: deck.map((d) => ({ id: d.id, name: d.name })) } : undefined,
+    deck: f.deckId ? { id: f.deckId, variants: deck.map((d) => ({ id: d.id, name: d.name, branchedFrom: d.variantOf ?? null })) } : undefined,
     build: f.buildOf ? { of: f.buildOf, url: f.buildUrl, openDifferences: openDrift(f.drift?.items, f.driftAccepted).length } : undefined,
     builds: board.frames.filter((b) => b.buildOf === f.id).map((b) => ({ id: b.id, openDifferences: openDrift(b.drift?.items, b.driftAccepted).length })),
   }
@@ -213,6 +217,31 @@ const handler = createMcpHandler(
           commentsForAgents: board.comments
             .filter((c) => c.forAgents && !c.resolved)
             .map((c) => ({ id: c.id, frameId: c.frameId, text: c.text, at: { x: c.x, y: c.y }, replies: c.replies.map((r) => `${r.author.name}: ${r.text}`) })),
+        })
+      },
+    )
+
+    server.registerTool(
+      'get_state_map',
+      {
+        title: 'Get state map',
+        description: 'Every screen and state on a page, the prototype links between them, and the loading, empty and error states routed screens still lack.',
+        inputSchema: z.object({ page_id: z.string().optional() }),
+      },
+      async (args: { page_id?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const board = getBoard()
+        const pageId = targetPage(board, actor, args.page_id)
+        if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
+        touch(actor, 'Reading the state map', undefined, false)
+        const map = stateMap(board, pageId)
+        return text({
+          page_id: pageId,
+          start_frame_id: map.start ?? null,
+          states: map.nodes.map((n) => ({ frame_id: n.id, name: n.frame.name, screen: n.screen, route: n.frame.route ?? null, state: n.state, step: n.level })),
+          links: map.edges.map((e) => ({ from: e.from, to: e.to, count: e.count })),
+          missing_states: map.missing.map((m) => ({ route: m.route, state: m.state, base_frame_id: m.near.id })),
+          unreached: map.start ? map.nodes.filter((n) => n.id !== map.start && !map.edges.some((e) => e.to === n.id)).map((n) => n.id) : [],
         })
       },
     )
