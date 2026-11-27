@@ -68,6 +68,21 @@ Google sign-in saves the user's profile and latest sign-in time in `zeko.users` 
 
 Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. Hosted MCP clients sign in through the browser with the same Google workspace. The hosted database role needs SELECT, INSERT, and DELETE on `zeko.mcp_oauth_grants`. Existing Basic-auth MCP credentials point to the original workspace.
 
+## Design drift
+
+Check that what got built matches what was designed. Select a design sketch, open **Details → Build**, and enter
+the address of the page that implements it (for example `http://localhost:3000/pricing`). Zeko captures the page
+beside the design, renders both at the design's width, matches their elements, and lists every difference:
+spacing, sizes, colors (including a hardcoded value where the design uses a token), type, copy, and missing or extra
+elements. Each difference is pinned on the build, with the change to make in code.
+
+**Send fixes to agent** hands the open differences to your coding agent; **Capture again** re-checks after the fix.
+Mark a difference **Intentional** to accept it; it stays accepted across checks. **Build it with your agent** asks the
+agent to implement the design, capture its build and work until nothing is left open. Agents can run the same loop
+over MCP with `capture_build` and `check_drift`.
+
+Hosted Zeko can't reach a dev server on your computer, so capture a deployed preview there, or run Zeko locally.
+
 ## Agent chat
 
 Choose an agent in the Agents panel and sign in to its local CLI if needed. Zeko bundles the ACP adapters for Codex and Claude. It also finds Cursor, Gemini CLI, GitHub Copilot, OpenCode, Kimi Code, and Mistral Vibe when their CLIs are installed on `PATH`.
@@ -107,7 +122,7 @@ Tools:
 - Layer editing: `get_layers` reads the layer tree and computed styles. `edit_layers` saves a batch of text, CSS, attribute and layout edits as one version.
 - Images and drawing: `place_image` and `place_svg` add images and drawings the agent made with its own tools, `get_image` shows it a sketch's picture to rework, and `add_shader` adds animated mesh gradient, liquid, grain, paper and halftone layers
 - Components: `create_component`, `get_component`, `insert_component`, `update_component` (every instance follows)
-- From and to code: `snapshot_url` captures a live webpage as an editable sketch; `get_frame_code` returns a sketch as HTML or a React component with the tokens, fonts, images and components it relies on
+- From and to code: `snapshot_url` captures a live webpage as an editable sketch; `get_frame_code` returns a sketch as HTML or a React component with the tokens, fonts, images and components it relies on; `capture_build` and `check_drift` compare the implemented page with its design
 - Designing: `create_sketch` (with `variant_of` to join a deck), `edit_sketch`, `append_to_sketch` for long pages,
   `fit_frame_to_content`, `delete_frame` (only frames the agent made)
 - Checking its own work: `screenshot_frame` returns the rendered sketch as an image, `inspect_frame` returns

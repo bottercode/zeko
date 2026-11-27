@@ -37,6 +37,14 @@ export interface Frame {
   deckId?: string
   /** set on the main copy of a component: editing this frame updates every instance */
   componentId?: string
+  /** set on a capture of the implemented page: the design frame it builds */
+  buildOf?: string
+  /** where the build was captured from, so it can be captured again */
+  buildUrl?: string
+  /** how the build differs from its design, from the last check */
+  drift?: DriftReport
+  /** keys of differences people accepted as intentional; they stay accepted across checks */
+  driftAccepted?: string[]
   /** earlier HTML of a sketch, newest last */
   versions?: Version[]
   createdBy: Actor
@@ -45,6 +53,33 @@ export interface Frame {
 }
 
 export type ShapeKind = 'rect' | 'ellipse' | 'path' | 'text'
+
+export type DriftKind = 'spacing' | 'size' | 'color' | 'token' | 'type' | 'text' | 'missing' | 'extra'
+
+export interface DriftItem {
+  /** stable across checks, so accepting a difference sticks */
+  key: string
+  kind: DriftKind
+  /** what and where, e.g. Space above “Cancel anytime” */
+  label: string
+  design: string
+  build: string
+  /** a short instruction for whoever fixes the code */
+  fix: string
+  /** where to pin it on the build frame, from 0 to 1 */
+  x: number
+  y: number
+  designPath?: string
+  buildPath?: string
+}
+
+export interface DriftReport {
+  checkedAt: number
+  /** the design frame's updatedAt when checked, to tell when the check is out of date */
+  designAt: number
+  matched: number
+  items: DriftItem[]
+}
 
 export interface Version {
   html: string
@@ -206,7 +241,7 @@ export interface Board {
   version: number
 }
 
-export type FramePatch = Partial<Pick<Frame, 'name' | 'x' | 'y' | 'w' | 'h' | 'url' | 'html' | 'route' | 'state' | 'approved' | 'reference'>>
+export type FramePatch = Partial<Pick<Frame, 'name' | 'x' | 'y' | 'w' | 'h' | 'url' | 'html' | 'route' | 'state' | 'approved' | 'reference' | 'buildOf' | 'buildUrl' | 'drift' | 'driftAccepted'>>
 
 export type Op =
   | { type: 'board.update'; name?: string; appUrl?: string; guidelines?: string; flowStart?: string; pageId?: string }

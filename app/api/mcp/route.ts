@@ -14,6 +14,8 @@ import { snapshotPage } from '@/lib/server/snapshot'
 import { SHADER_PRESETS, shaderLayerHtml, type ShaderPreset } from '@/lib/shaders'
 import { componentDocument, countInstances } from '@/lib/components'
 import { codeNotes, frameCode } from '@/lib/code'
+import { captureBuild } from '@/lib/server/drift'
+import { openDrift } from '@/lib/drift'
 import { MCP_AGENT_HEADER } from '@/lib/auth-access'
 import { DESIGN_BRIEF } from '@/lib/design-brief'
 
@@ -55,7 +57,11 @@ How to work:
 7. snapshot_url captures a live webpage as an editable sketch. get_frame_code hands a frame to implementation:
    its HTML or a React component, plus the tokens, fonts, images and components it relies on. When implementing
    a frame in a codebase, map those to the project's own theme, components and assets instead of pasting the markup.
-8. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.
+8. Closing the loop on an implementation: once the page runs (for example on the dev server), call capture_build with
+   the design frame and the page's URL. Zeko captures it beside the design and lists every difference (spacing, size,
+   colors and tokens, type, copy, missing elements). Fix the code, call check_drift to capture again, and repeat until
+   no open differences remain or the rest are intentional; say which and why.
+9. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.
 
 ${DESIGN_BRIEF}`
 
@@ -148,6 +154,8 @@ function summarizeFrame(board: Board, f: Frame) {
     position: { x: f.x, y: f.y },
     url: frameSourceUrl(f, board.appUrl),
     deck: f.deckId ? { id: f.deckId, variants: deck.map((d) => ({ id: d.id, name: d.name })) } : undefined,
+    build: f.buildOf ? { of: f.buildOf, url: f.buildUrl, openDifferences: openDrift(f.drift?.items, f.driftAccepted).length } : undefined,
+    builds: board.frames.filter((b) => b.buildOf === f.id).map((b) => ({ id: b.id, openDifferences: openDrift(b.drift?.items, b.driftAccepted).length })),
   }
 }
 
@@ -883,6 +891,78 @@ const handler = createMcpHandler(
           shaders: notes.shaders.length ? { presets: notes.shaders, note: 'Shader layers are drawn by the inline zeko-shaders script; port it or replace them with the project’s own effect.' } : undefined,
           components: notes.componentIds.map((id) => ({ id, name: board.components?.find((c) => c.id === id)?.name })).filter((c) => c.name),
         })
+      },
+    )
+
+
+    /** A drift report written for an agent: each open difference with what to change in the code. */
+    const driftText = (result: Awaited<ReturnType<typeof captureBuild>>) => {
+      const open = openDrift(result.drift.items, result.build.driftAccepted)
+      return text({
+        build_frame_id: result.build.id,
+        design_frame_id: result.design.id,
+        url: result.build.buildUrl,
+        matched_elements: result.drift.matched,
+        open_differences: open.length,
+        accepted_as_intentional: result.drift.items.length - open.length,
+        differences: open.map((item, i) => ({ n: i + 1, kind: item.kind, where: item.label, design: item.design, build: item.build, fix: item.fix })),
+        next: open.length
+          ? 'Fix these in the codebase, then call check_drift to capture the page again.'
+          : result.drift.matched < 3
+            ? 'Few elements matched: check that the URL shows the page this design is for.'
+            : 'The build matches the design.',
+      })
+    }
+
+    server.registerTool(
+      'capture_build',
+      {
+        title: 'Capture build',
+        description: 'Capture the page that implements a design frame (for example http://localhost:3000/pricing on the dev server) beside the design, and check it for drift: spacing, sizes, colors and design tokens, type, copy, and missing or extra elements. Returns each difference with the change to make in code. Capturing again for the same design and URL updates the existing build frame.',
+        inputSchema: z.object({
+          design_frame_id: z.string(),
+          url: z.string().min(1).max(2048),
+          name: z.string().min(1).max(120).optional(),
+        }),
+      },
+      async (args: { design_frame_id: string; url: string; name?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const same = getBoard().frames.find((f) => f.buildOf === args.design_frame_id && f.buildUrl === args.url.trim())
+        try {
+          touch(actor, 'Capturing the build', args.design_frame_id, true)
+          const result = await captureBuild({ board: getBoard, apply: (op) => { dispatch(op, actor) } }, { designId: args.design_frame_id, buildId: same?.id, url: args.url, name: args.name })
+          touch(actor, `Checked the build: ${openDrift(result.drift.items, result.build.driftAccepted).length} open differences`, result.build.id, false)
+          return driftText(result)
+        } catch (error) {
+          touch(actor, 'Build capture failed', args.design_frame_id, false)
+          const message = error instanceof Error ? error.message : 'Could not capture the build.'
+          return fail(process.env.ZEKO_HOSTED === '1' && /private network/i.test(message)
+            ? `${message} Hosted Zeko can’t reach the dev server on this computer: deploy a preview and capture that URL instead.`
+            : message)
+        }
+      },
+    )
+
+    server.registerTool(
+      'check_drift',
+      {
+        title: 'Check drift',
+        description: 'Capture a build frame again from its URL (after fixing the code) and list the differences that are still open. Differences people accepted as intentional are left out.',
+        inputSchema: z.object({ build_frame_id: z.string(), recapture: z.boolean().default(true) }),
+      },
+      async (args: { build_frame_id: string; recapture: boolean }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const build = getBoard().frames.find((f) => f.id === args.build_frame_id)
+        if (!build?.buildOf) return fail(`${args.build_frame_id} is not a build frame. Call capture_build first.`)
+        try {
+          touch(actor, 'Checking the build', build.id, true)
+          const result = await captureBuild({ board: getBoard, apply: (op) => { dispatch(op, actor) } }, { buildId: build.id, recapture: args.recapture })
+          touch(actor, `Checked the build: ${openDrift(result.drift.items, result.build.driftAccepted).length} open differences`, build.id, false)
+          return driftText(result)
+        } catch (error) {
+          touch(actor, 'Drift check failed', build.id, false)
+          return failure(error, 'Could not check the build.')
+        }
       },
     )
 

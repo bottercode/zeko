@@ -17,6 +17,16 @@ const frame = z.object({
   url: z.string().optional(), html: z.string().optional(), route: z.string().optional(),
   state: z.string().optional(), shape: z.enum(['rect', 'ellipse', 'path', 'text']).optional(),
   sheetRoute: z.string().optional(), deckId: id.optional(),
+  componentId: id.optional(), buildOf: id.optional(), buildUrl: z.string().optional(),
+  drift: z.object({
+    checkedAt: time, designAt: time, matched: z.number().default(0),
+    items: z.array(z.object({
+      key: z.string(), kind: z.enum(['spacing', 'size', 'color', 'token', 'type', 'text', 'missing', 'extra']),
+      label: z.string(), design: z.string(), build: z.string(), fix: z.string(), x: z.number(), y: z.number(),
+      designPath: z.string().optional(), buildPath: z.string().optional(),
+    })),
+  }).optional(),
+  driftAccepted: z.array(z.string()).optional(),
   versions: z.array(z.object({ html: z.string(), at: time, by: actor })).optional(),
   createdBy: actor.default({ kind: 'human', name: 'You' }), createdAt: time, updatedAt: time,
 })

@@ -11,6 +11,7 @@ import { LIVE_FRAMES } from '@/lib/features'
 import { STREAM_MARKER, cameFromBridge, registerFrame, sendToFrame, withBridge } from '@/lib/client/bridge'
 import { useFrameActions } from './actions'
 import { FrameComments } from './FrameComments'
+import { DriftBadge, DriftPins } from './BuildSections'
 import { useCameraZoom, useStudio } from './studio-context'
 import { cx, type MenuItem } from './kit'
 
@@ -271,6 +272,7 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
       </div>
 
       <FrameComments frame={frame} />
+      <DriftPins frame={frame} />
 
       {single &&
         CORNERS.map((c) => (
@@ -394,6 +396,7 @@ function Label({ frame, members, position, k, selected, interacting, width }: La
         <span className="truncate">{frame.name}</span>
         {!interacting && frame.state && frame.state !== 'default' && <span className="shrink-0 rounded bg-wash px-1.5 text-2xs leading-4 text-slate">{frame.state}</span>}
       </button>
+      {!interacting && <DriftBadge frame={frame} />}
 
       {members.length > 1 && (
         <span className="flex h-6 shrink-0 items-center rounded-md bg-panel shadow-[0_0_0_1px_var(--color-hair)]">

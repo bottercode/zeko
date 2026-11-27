@@ -2,7 +2,9 @@
 
 import { deckMembers, frameSourceUrl } from '@/lib/ops'
 import { newId } from '@/lib/client/useBoard'
-import type { Frame } from '@/lib/types'
+import type { DriftReport, Frame } from '@/lib/types'
+import { acpAgent, type AcpSelection } from '@/lib/acp'
+import { driftRequest, openDrift } from '@/lib/drift'
 import { withDesignTokens } from '@/lib/tokens'
 import { copyToClipboard, frameCode, type CodeFormat } from '@/lib/client/copy-code'
 import { useStudio } from './studio-context'
@@ -38,6 +40,15 @@ export function useFrameActions() {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Couldn’t render that frame.')
     }
+  }
+
+  /** Hands a request to the agent people used last, the way the request box does. */
+  const askAgent = (text: string, frameIds: string[], chatId: string) => {
+    const last = [...board.tasks].reverse().find((task) => task.acp)
+    const acp: AcpSelection = last?.acp ?? { agent: 'codex', settings: {} }
+    const agent = acpAgent(acp.agent)
+    dispatch({ type: 'task.add', id: newId(), text, frameIds, chatId, assignee: agent?.name, acp })
+    toast(`Sent to ${agent?.name ?? 'your agent'}. Follow along in Agents`)
   }
 
   return {
@@ -129,6 +140,55 @@ export function useFrameActions() {
     restoreVersion(frame: Frame, at: number) {
       dispatch({ type: 'frame.restoreVersion', id: frame.id, at })
       toast('Earlier version restored. ⌘Z undoes it')
+    },
+    /** Captures the page that implements a design and checks it for drift; with a build, captures that build again. */
+    async checkBuild(input: { design?: Frame; build?: Frame; url?: string }) {
+      const target = input.build ?? input.design
+      if (!target) return null
+      toast(input.build ? `Checking ${input.build.name}…` : 'Capturing the build…')
+      try {
+        const res = await fetch(`/api/drift?board=${encodeURIComponent(boardId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ designId: input.design?.id, buildId: input.build?.id, url: input.url }),
+        })
+        const data = (await res.json().catch(() => ({}))) as { buildId?: string; drift?: DriftReport; error?: string }
+        if (!res.ok || !data.buildId || !data.drift) throw new Error(data.error ?? 'Couldn’t check that build.')
+        const accepted = board.frames.find((f) => f.id === data.buildId)?.driftAccepted
+        const open = openDrift(data.drift.items, accepted).length
+        if (!input.build) select([data.buildId])
+        toast(open ? `${plural(open, 'difference')} from the design` : data.drift.matched < 3 ? 'Few elements matched: is this the right page?' : 'The build matches the design')
+        return data.buildId
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'Couldn’t check that build.')
+        return null
+      }
+    },
+    /** Asks the agent to implement an approved design in the codebase and close the loop with a drift check. */
+    buildIt(design: Frame) {
+      const route = design.route ? ` (route ${design.route})` : ''
+      askAgent([
+        `Implement the design frame “${design.name}” (frame ${design.id}${route}) in this codebase.`,
+        `1. Call get_frame_code with frame_id ${design.id} for its markup and the tokens, fonts, images and components it uses.`,
+        `2. Build it with the project's own components, styles and theme; don't paste the raw markup.`,
+        `3. Run the app and call capture_build with design_frame_id ${design.id} and the page's URL${design.route ? `, for example http://localhost:3000${design.route}` : ''}.`,
+        '4. Fix the differences it lists and call check_drift until none are open, or explain the ones that are intentional.',
+      ].join('\n'), [design.id], `build-${design.id}`)
+    },
+    /** Sends the open differences of a build to the agent as one request. */
+    sendDriftFixes(build: Frame) {
+      const design = board.frames.find((f) => f.id === build.buildOf)
+      const open = openDrift(build.drift?.items, build.driftAccepted)
+      if (!design || !open.length) return
+      askAgent(driftRequest(design, build, open), [build.id, design.id], `build-${design.id}`)
+    },
+    compareWithDesign(build: Frame) {
+      if (build.buildOf && board.frames.some((f) => f.id === build.buildOf)) openLoupe([build.buildOf, build.id])
+    },
+    acceptDrift(build: Frame, key: string, accepted: boolean) {
+      const keys = new Set(build.driftAccepted ?? [])
+      if (accepted) keys.add(key)
+      else keys.delete(key)
+      dispatch({ type: 'frame.update', id: build.id, patch: { driftAccepted: [...keys] } })
     },
     canOpenInTab(frame: Frame) {
       return !!frameSourceUrl(frame, board.appUrl)

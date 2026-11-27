@@ -12,6 +12,7 @@ import type { Frame, FramePatch } from '@/lib/types'
 import { useFrameActions } from './actions'
 import { ChoiceSelect } from './ChoiceSelect'
 import { ElementInspector } from './ElementInspector'
+import { BuildSection, DriftSection } from './BuildSections'
 import { InspectorMenu, InspectorSection, InspectorViews, NumberProperty, PropertyRow, SelectionHeader } from './InspectorUI'
 import { IconButton, Kbd, cx } from './kit'
 import { Badge } from './ui/badge'
@@ -64,6 +65,7 @@ function OneFrame({ frame }: { frame: Frame }) {
 
   const layout = (
     <>
+      {frame.buildOf && <DriftSection build={frame} />}
       {website && (
         <InspectorSection title="Website" icon={Globe}>
           {sourceUrl && <p className="truncate text-xs text-muted-foreground" title={sourceUrl}>{sourceUrl}</p>}
@@ -151,6 +153,7 @@ function OneFrame({ frame }: { frame: Frame }) {
           <InspectorCheck checked={!!frame.reference} onChange={(reference) => patch({ reference })}>Pin as design reference</InspectorCheck>
         </InspectorSection>
       )}
+      {frame.kind === 'sketch' && !frame.shape && !frame.buildOf && <BuildSection design={frame} />}
       {frame.kind === 'sketch' && (
         <InspectorSection title="Export" icon={Download}>
           <div className="grid grid-cols-3 gap-1.5">
