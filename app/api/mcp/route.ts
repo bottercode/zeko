@@ -1,7 +1,7 @@
 import { createMcpHandler } from 'mcp-handler'
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
-import { boardPages, deckMembers, designGuidelines, framePage, frameSourceUrl, pageStart, visibleFrames } from '@/lib/ops'
+import { boardPages, deckMembers, designGuidelines, framePage, frameSourceUrl, pageStart, placeFrame, visibleFrames } from '@/lib/ops'
 import { defaultDesign, withDesignTokens } from '@/lib/tokens'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import * as store from '@/lib/server/store'
@@ -20,6 +20,9 @@ import { MCP_AGENT_HEADER } from '@/lib/auth-access'
 import { stateMap } from '@/lib/state-map'
 import { DESIGN_BRIEF } from '@/lib/design-brief'
 
+/** Above this, a page sent in one piece kept the person waiting long enough to say so. */
+const STREAM_HINT_CHARS = 6000
+
 const INSTRUCTIONS = `Zeko is a light table for a product's screens. Each frame is a sketch: a whole HTML
 document you write, labelled with the route and state it stands for.
 Variants of one screen stack into a deck; the person flips through it and keeps one.
@@ -36,10 +39,14 @@ How to work:
    The path is made of zero-based child indexes from body, excluding script, style, meta, link, noscript,
    template, title and head elements. Confirm the tag and label before editing, since the sketch may have changed.
    For targeted changes, use get_layers to find the layer paths and revision, then edit_layers to save text, CSS, or structural changes in one batch.
-3. For design work, call set_status as soon as you know what you are making. Publish the first real section
-   early with create_sketch and streaming: true. Use a small, valid HTML document with inline CSS and put
-   <!-- zeko:stream --> where the next section belongs. Call append_to_sketch with before set to that marker
-   and one complete section at a time. Set done: true on the last section. Add or refine imagery after the
+3. For design work, call set_status as soon as you know what you are making. The person is watching the canvas:
+   open each new screen within seconds and let it fill in, never write a whole page before it appears.
+   Call create_sketch with streaming: true and just the shell: the <head> with fonts and styles, the page's
+   frame or top bar, and <!-- zeko:stream --> where the next section belongs. Then call append_to_sketch with
+   before set to that marker, one complete section at a time (a sidebar, a list, a card group), and done: true
+   on the last. For several screens, open and stream them one after another, not all at the end.
+   Give each screen its route and state: Zeko places another state of a screen in that screen's row and
+   starts a new row for a new screen. arrange_page tidies a page into those rows. Add or refine imagery after the
    layout is visible. For a redesign, use variant_of to add the draft to the existing frame's deck.
    When asked for alternates, make each one with create_sketch and variant_of set to the frame it branches from,
    named after its idea; the person sees them as a tree and keeps one.
@@ -163,15 +170,6 @@ function summarizeFrame(board: Board, f: Frame) {
   }
 }
 
-/** A spot to the right of everything, so new frames never land on top of others. */
-function freeSpot(board: Board, pageId: string) {
-  const frames = visibleFrames(board, pageId)
-  if (frames.length === 0) return { x: 0, y: 0 }
-  const right = Math.max(...frames.map((f) => f.x + f.w))
-  const top = Math.min(...frames.map((f) => f.y))
-  return { x: right + 120, y: top }
-}
-
 function targetPage(board: Board, actor: Actor, requested?: string) {
   const pages = boardPages(board)
   const first = pages[0]!.id
@@ -218,6 +216,25 @@ const handler = createMcpHandler(
             .filter((c) => c.forAgents && !c.resolved)
             .map((c) => ({ id: c.id, frameId: c.frameId, text: c.text, at: { x: c.x, y: c.y }, replies: c.replies.map((r) => `${r.author.name}: ${r.text}`) })),
         })
+      },
+    )
+
+    server.registerTool(
+      'arrange_page',
+      {
+        title: 'Arrange page',
+        description: 'Lay a page out in rows: one row per route, its states left to right (default, loading, empty, error), each row labelled. Use it after adding several screens, or when the page has become hard to read.',
+        inputSchema: z.object({ page_id: z.string().optional() }),
+      },
+      async (args: { page_id?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const board = getBoard()
+        const pageId = targetPage(board, actor, args.page_id)
+        if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
+        dispatch({ type: 'sheet.arrange', pageId }, actor)
+        touch(actor, 'Arranged the page in rows', undefined, false)
+        const routes = new Set(visibleFrames(getBoard(), pageId).filter((f) => !f.shape).map((f) => f.route?.trim() || '(no route)'))
+        return text({ page_id: pageId, rows: routes.size })
       },
     )
 
@@ -281,7 +298,7 @@ const handler = createMcpHandler(
       {
         title: 'Create sketch',
         description:
-          'Add a sketch from self-contained HTML. Set streaming: true to show work in progress, include the first visible section, and leave a unique <!-- zeko:stream --> marker for append_to_sketch. Use variant_of to add to an existing frame’s deck.',
+          'Add a sketch. For a new screen, set streaming: true and send only the shell first (head, styles and the first visible section) with a unique <!-- zeko:stream --> marker, then fill it in with append_to_sketch, so the person sees the frame at once and watches it build. Pass a whole document without streaming only for small frames. Set route and state so the frame lands in its screen’s row. Use variant_of to add to an existing frame’s deck.',
         inputSchema: z.object({
           name: z.string().min(1).max(120),
           html: z.string().min(1),
@@ -312,14 +329,18 @@ const handler = createMcpHandler(
         } else {
           const pageId = targetPage(board, actor, args.page_id)
           if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
-          const spot = freeSpot(board, pageId)
+          const spot = placeFrame(board, pageId, { w: args.width, h: args.height, route: args.route })
           board = dispatch(
             { type: 'frame.create', frame: { id, pageId, name: args.name, kind: 'sketch', html: args.html, w: args.width, h: args.height, route: args.route, state: args.state, ...spot } },
             actor,
           )
         }
         touch(actor, args.streaming ? `Drawing ${args.name}` : `Sketched ${args.name}`, id, args.streaming)
-        return text({ frame_id: id, deck: board.frames.find((f) => f.id === id)?.deckId ?? null })
+        const result: Record<string, unknown> = { frame_id: id, deck: board.frames.find((f) => f.id === id)?.deckId ?? null }
+        if (!args.streaming && args.html.length > STREAM_HINT_CHARS) {
+          result.note = 'The person saw nothing until this whole page arrived. For the next screen, open it with streaming: true and a small shell, then add sections with append_to_sketch.'
+        }
+        return text(result)
       },
     )
 
@@ -438,7 +459,7 @@ const handler = createMcpHandler(
         } else {
           const pageId = targetPage(board, actor)
           if (!pageId) return fail('No page is available.')
-          dispatch({ type: 'frame.create', frame: { id, pageId, name: args.name, kind: 'live', url: args.url, w: args.width, h: args.height, route, state: args.state, ...freeSpot(board, pageId) } }, actor)
+          dispatch({ type: 'frame.create', frame: { id, pageId, name: args.name, kind: 'live', url: args.url, w: args.width, h: args.height, route, state: args.state, ...placeFrame(board, pageId, { w: args.width, h: args.height, route }) } }, actor)
         }
         touch(actor, `Added ${args.name}`, id, false)
         return text({ frame_id: id })
@@ -670,7 +691,7 @@ const handler = createMcpHandler(
           if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
           const id = nanoid(10)
           const html = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh"><img src="${src}" alt="${escapeAttr(args.alt)}" style="display:block;width:100%;height:100%;object-fit:cover"></body></html>`
-          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? 'Image', html, w: args.width, h: args.height, ...freeSpot(board, pageId) } }, actor)
+          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? 'Image', html, w: args.width, h: args.height, ...placeFrame(board, pageId, { w: args.width, h: args.height }) } }, actor)
           touch(actor, 'Placed an image', id, false)
           return text({ frame_id: id })
         } catch (error) {
@@ -888,7 +909,7 @@ const handler = createMcpHandler(
           const pageId = targetPage(board, actor, args.page_id)
           if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
           const id = nanoid(10)
-          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? shot.title, html: shot.html, w: args.width, h: Math.max(args.height, shot.height), route: args.route, ...freeSpot(board, pageId) } }, actor)
+          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? shot.title, html: shot.html, w: args.width, h: Math.max(args.height, shot.height), route: args.route, ...placeFrame(board, pageId, { w: args.width, h: Math.max(args.height, shot.height), route: args.route }) } }, actor)
           touch(actor, `Captured ${shot.title}`, id, false)
           return text({ frame_id: id, title: shot.title, height: Math.max(args.height, shot.height) })
         } catch (error) {

@@ -218,6 +218,41 @@ function arrange(board: Board, pageId: string, actor: Actor, now: number) {
   }
 }
 
+/** A row wraps once it is this wide, so a canvas grows in both directions instead of into one long strip. */
+export const ROW_MAX_WIDTH = 7200
+const ROW_GAP = 200
+
+/**
+ * Where a new frame goes. Another state of a screen joins that screen's row, after the states already there;
+ * a new screen starts a row of its own below everything; frames with no route continue the last row until it
+ * is full. Nothing is placed on top of another frame.
+ */
+export function placeFrame(board: Board, pageId: string, frame: { w: number; h: number; route?: string }): { x: number; y: number } {
+  const frames = visibleFrames(board, pageId).filter((f) => !f.shape)
+  if (!frames.length) return { x: 0, y: 0 }
+  const left = Math.min(...frames.map((f) => f.x))
+  const bottom = Math.max(...frames.map((f) => f.y + f.h))
+  const newRow = { x: left, y: bottom + ROW_GAP }
+  const free = (x: number, y: number) => !frames.some((f) => x < f.x + f.w + CELL_GAP / 2 && x + frame.w + CELL_GAP / 2 > f.x && y < f.y + f.h + CELL_GAP / 2 && y + frame.h + CELL_GAP / 2 > f.y)
+  // The frames in the band of rows starting at y, to find the end of that row.
+  const rowEnd = (y: number) => {
+    const inRow = frames.filter((f) => f.y < y + frame.h && f.y + f.h > y)
+    return inRow.length ? Math.max(...inRow.map((f) => f.x + f.w)) : left
+  }
+  const nextTo = (y: number) => {
+    const x = rowEnd(y) + CELL_GAP
+    return x + frame.w - left <= ROW_MAX_WIDTH && free(x, y) ? { x, y } : undefined
+  }
+  const route = frame.route?.trim()
+  if (route) {
+    const lane = frames.filter((f) => f.route?.trim() === route)
+    if (!lane.length) return newRow
+    return nextTo(Math.min(...lane.map((f) => f.y))) ?? newRow
+  }
+  const lastRowTop = Math.max(...frames.map((f) => f.y))
+  return nextTo(lastRowTop) ?? newRow
+}
+
 export const STATE_ORDER = ['default', 'loading', 'empty', 'error', 'success']
 export function stateRank(state?: string) {
   const i = STATE_ORDER.indexOf((state ?? 'default').toLowerCase())
