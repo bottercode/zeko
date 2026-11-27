@@ -21,7 +21,10 @@ import {
   Route,
   Search,
   Shapes,
+  Sparkles,
   Square,
+  Component,
+  Ellipsis,
   TextCursorInput,
   Type,
   Palette,
@@ -31,7 +34,7 @@ import {
 import { AGENT_AWAY_MS, boardPages, byRoute, deckMembers, UNROUTED, visibleFrames } from '@/lib/ops'
 import { agentColor, newId } from '@/lib/client/useBoard'
 import type { LayerNode } from '@/lib/client/bridge'
-import type { Frame } from '@/lib/types'
+import type { Frame, SketchComponent } from '@/lib/types'
 import { LEFT_PANEL_WIDTH, useStudio } from './studio-context'
 import { Heading, IconButton, Tip, cx } from './kit'
 import { TokensPanel } from './TokensPanel'
@@ -41,6 +44,8 @@ import { Input } from './ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './ui/input-group'
 import { Separator } from './ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { countInstances } from '@/lib/components'
 
 const TABS = [
   { id: 'layers', label: 'Layers', Icon: LayersIcon },
@@ -115,11 +120,17 @@ function PanelSearch({ query, setQuery, label }: { query: string; setQuery: (val
 }
 
 function ComponentsTab() {
-  const { board, element, addFrame, saveComponent, dispatch } = useStudio()
+  const { board, element, interactId, addFrame, saveComponent, editComponent, insertHtml, dispatch, toast } = useStudio()
   const [query, setQuery] = useState('')
   const components = board.components ?? []
   const term = query.trim().toLowerCase()
   const shown = components.filter((component) => !term || component.name.toLowerCase().includes(term) || component.tag.includes(term))
+  const editingSketch = !!interactId && board.frames.some((frame) => frame.id === interactId && frame.kind === 'sketch' && !frame.componentId)
+  const uses = (id: string) => board.frames.reduce((total, frame) => total + (frame.componentId ? 0 : countInstances(frame.html, id)), 0)
+  const insert = (component: SketchComponent) => {
+    if (editingSketch && component.body && insertHtml(component.body)) return toast(`Inserted ${component.name}`)
+    addFrame('sketch', component)
+  }
   return (
     <>
       <div className="min-h-0 flex-1 overflow-auto p-2.5">
@@ -128,33 +139,56 @@ function ComponentsTab() {
             <Plus size={14} />
           </IconButton>
         }>Library</Heading>
+        {components.length > 0 && (
+          <p className="px-1 pb-2 text-xs text-slate">
+            {editingSketch ? 'Click to place an instance in the sketch you are editing.' : 'Open a sketch to place instances, or click to add one as a frame.'}
+          </p>
+        )}
         {components.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-1 py-5">
             <Boxes size={19} strokeWidth={1.5} className="text-slate" />
             <p className="font-medium text-ink">No components yet</p>
-            <p className="text-sm leading-relaxed text-slate">Select an element in a sketch, then save it here to reuse on this canvas.</p>
+            <p className="text-sm leading-relaxed text-slate">Select an element in a sketch, then save it here. Every copy you place stays in step with the main component.</p>
           </div>
         ) : shown.length === 0 ? (
           <p className="px-1 py-3 text-sm text-slate">No matching components.</p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {shown.map((component) => (
-              <li key={component.id} className="group flex min-w-0 items-center gap-1 rounded-md bg-wash/50">
-                <button
-                  aria-label={`Insert ${component.name}`}
-                  onClick={() => addFrame('sketch', component)}
-                  className="editor-control flex h-9 min-w-0 flex-1 items-center gap-2 px-2 text-left"
-                >
-                  <Boxes size={14} strokeWidth={1.75} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate text-ink">{component.name}</span>
-                  <span className="font-mono text-2xs">&lt;{component.tag}&gt;</span>
-                  <Plus size={13} strokeWidth={1.75} className="shrink-0" />
-                </button>
-                <IconButton label={`Remove ${component.name} from library`} onClick={() => dispatch({ type: 'component.remove', id: component.id })} className="mr-1 size-6 shrink-0">
-                  <Trash2 size={13} />
-                </IconButton>
-              </li>
-            ))}
+            {shown.map((component) => {
+              const count = uses(component.id)
+              return (
+                <li key={component.id} className="group flex min-w-0 items-center gap-1 rounded-md bg-wash/50">
+                  <button
+                    aria-label={editingSketch ? `Place ${component.name} in the sketch` : `Add ${component.name} as a frame`}
+                    onClick={() => insert(component)}
+                    className="editor-control flex h-9 min-w-0 flex-1 items-center gap-2 px-2 text-left"
+                  >
+                    <Component size={14} strokeWidth={1.75} className="shrink-0 text-grease" />
+                    <span className="min-w-0 flex-1 truncate text-ink">{component.name}</span>
+                    {count > 0 && <span className="shrink-0 text-2xs tabular-nums text-mist" title={`${count} instance${count === 1 ? '' : 's'}`}>{count}×</span>}
+                    <Plus size={13} strokeWidth={1.75} className="shrink-0" />
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`${component.name} actions`} className="editor-control mr-1 shrink-0" />}>
+                      <Ellipsis size={13} />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onClick={() => editComponent(component)}><Pencil aria-hidden /> Edit main component</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => addFrame('sketch', component)}><Hash aria-hidden /> Add as a frame</DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem variant="destructive" onClick={() => {
+                          dispatch({ type: 'component.remove', id: component.id })
+                          if (count) toast(`Removed ${component.name}. Its ${count} instance${count === 1 ? ' stays' : 's stay'} as plain layers`)
+                        }}><Trash2 aria-hidden /> Remove from library</DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
@@ -412,25 +446,62 @@ const ICONS: Record<LayerNode['kind'], typeof Type> = {
   input: TextCursorInput,
   box: Square,
   svg: Shapes,
+  shader: Sparkles,
 }
+
+/** The layer being dragged in the tree; dataTransfer can't be read during dragover. */
+let draggingLayer: string | null = null
+type DropPosition = 'before' | 'after' | 'inside'
 
 function ElementRow({ node, depth, focused, selected, send }: { node: LayerNode; depth: number; focused?: string; selected: string | null; send: ReturnType<typeof useStudio>['toFrame'] }) {
   const holdsSelection = !!selected && (selected === node.path || selected.startsWith(node.path + '.'))
   const [open, setOpen] = useState(depth < 2)
   const expanded = open || (holdsSelection && selected !== node.path)
-  const Icon = ICONS[node.kind]
+  const Icon = node.instance ? Component : ICONS[node.kind]
   const on = selected === node.path
+  const [hint, setHint] = useState<DropPosition | null>(null)
+  const positionAt = (event: React.DragEvent<HTMLDivElement>): DropPosition => {
+    const r = event.currentTarget.getBoundingClientRect()
+    const at = (event.clientY - r.top) / r.height
+    if (node.kind === 'box') return at < 0.28 ? 'before' : at > 0.72 ? 'after' : 'inside'
+    return at < 0.5 ? 'before' : 'after'
+  }
   return (
     <li role="treeitem" data-layer-key={`element:${node.path}`} aria-label={`${node.name}, ${node.tag}`} aria-selected={on}
       aria-expanded={node.children.length ? expanded : undefined} tabIndex={focused === `element:${node.path}` ? 0 : -1}
       className="outline-none focus-visible:[&>div]:ring-1 focus-visible:[&>div]:ring-ring">
-      <div className={cx('group flex h-7 items-center rounded-md', on ? 'bg-grease-soft' : 'hover:bg-wash')}
+      <div className={cx('group relative flex h-7 items-center rounded-md', on ? 'bg-grease-soft' : 'hover:bg-wash', hint === 'inside' && 'ring-1 ring-grease ring-inset')}
         style={{ paddingLeft: 4 + depth * 12 }}
+        draggable
+        onDragStart={(event) => {
+          draggingLayer = node.path
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', node.name)
+        }}
+        onDragEnd={() => { draggingLayer = null }}
+        onDragOver={(event) => {
+          const from = draggingLayer
+          if (!from || from === node.path || node.path.startsWith(from + '.')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          const next = positionAt(event)
+          if (next !== hint) setHint(next)
+        }}
+        onDragLeave={() => setHint(null)}
+        onDrop={(event) => {
+          const from = draggingLayer
+          setHint(null)
+          draggingLayer = null
+          if (!from || from === node.path || node.path.startsWith(from + '.')) return
+          event.preventDefault()
+          send({ type: 'reparent', path: from, target: node.path, position: positionAt(event) })
+        }}
         onPointerEnter={() => send({ type: 'hover', path: node.path })}
         onPointerLeave={() => send({ type: 'hover', path: null })}>
+        {hint && hint !== 'inside' && <span aria-hidden className={cx('pointer-events-none absolute right-1 h-0.5 rounded-full bg-grease', hint === 'before' ? '-top-px' : '-bottom-px')} style={{ left: 4 + depth * 12 }} />}
         <Button data-layer-select tabIndex={-1} variant="ghost" size="sm" onClick={() => send({ type: 'select', path: node.path })}
           className="min-w-0 flex-1 justify-start px-1.5 font-normal">
-          <Icon aria-hidden className={on ? 'text-grease' : 'text-muted-foreground'} />
+          <Icon aria-hidden className={on || node.instance ? 'text-grease' : 'text-muted-foreground'} />
           <span className="min-w-0 flex-1 truncate text-left">{node.name}</span>
           <span className="shrink-0 font-mono text-xs text-muted-foreground">{node.tag}</span>
         </Button>

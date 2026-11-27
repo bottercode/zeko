@@ -8,6 +8,7 @@ import { newId, useBoard, useNow } from '@/lib/client/useBoard'
 import { imageSketch, isBoardImage } from '@/lib/client/images'
 import { createCamera, INITIAL_CAMERA, type Camera } from '@/lib/client/camera'
 import { createFrameGesture } from '@/lib/client/frame-gesture'
+import { useWebMcp } from '@/lib/client/webmcp'
 import { frameIdOf, noteBridgeHtml, sendToFrame, type ElementInfo, type Hotspot, type LayerNode, type ToFrame } from '@/lib/client/bridge'
 import type { Frame, Op, SketchComponent } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
@@ -309,7 +310,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   )
 
   const placeFrame = useCallback(
-    (content: Pick<Frame, 'kind' | 'name' | 'url' | 'html' | 'route' | 'state'>, size = { w: 1280, h: 800 }) => {
+    (content: Pick<Frame, 'kind' | 'name' | 'url' | 'html' | 'route' | 'state' | 'componentId'>, size = { w: 1280, h: 800 }) => {
       const { w, h } = stageSize()
       const cx = leftInset + (w - leftInset - rightInset) / 2
       const cy = CHROME.top + (h - CHROME.top - CHROME.bottom) / 2
@@ -330,6 +331,18 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
     if (kind === 'live') placeFrame({ kind, name: 'Home', url: '/', route: '/', state: 'default' })
     else placeFrame({ kind, name: component?.name ?? 'New sketch', html: component?.html ?? BLANK_SKETCH }, component && { w: component.w, h: component.h })
   }, [placeFrame])
+
+  const editComponent = useCallback((component: SketchComponent) => {
+    const main = board?.frames.find((frame) => frame.componentId === component.id)
+    if (main) {
+      select([main.id])
+      flyTo(main)
+      return
+    }
+    const frame = placeFrame({ kind: 'sketch', name: component.name, html: component.html, componentId: component.id }, { w: component.w, h: component.h })
+    fitBoxes([frame], 1)
+    toast('Editing the main component. Changes reach every instance')
+  }, [board, select, flyTo, placeFrame, fitBoxes, toast])
 
   const saveWebsite = (url: URL) => {
     const frame = websiteFrame ?? placeFrame({ kind: 'website', name: url.hostname, url: url.href })
@@ -452,6 +465,12 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const toFrame = useCallback((message: ToFrame) => {
     if (editingRef.current) sendToFrame(editingRef.current, message)
   }, [])
+  const elementPath = element?.path ?? null
+  const insertHtml = useCallback((html: string) => {
+    if (!editingRef.current) return false
+    sendToFrame(editingRef.current, { type: 'insert-html', path: elementPath, html, position: 'inside' })
+    return true
+  }, [elementPath])
 
   const setTool = useCallback((next: Tool) => {
     // Drawing happens on the board, so leave the sketch being edited.
@@ -529,12 +548,16 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
         openWebsite,
         openCode: setCodeFrameId,
         saveComponent,
+        editComponent,
+        insertHtml,
         toast,
         openMenu,
         confirm,
       },
-    [boardId, board, pageId, switchPage, dispatch, undo, redo, history, now, selection, select, toggle, tool, setTool, prototype, hotspots, play, playerOpen, camera, setCamera, flyTo, showResult, fit, frameGesture, interactId, layers, element, toFrame, draft, openThread, threadInPanel, setOpenThread, openLoupe, addFrame, openWebsite, saveComponent, toast, openMenu, confirm],
+    [boardId, board, pageId, switchPage, dispatch, undo, redo, history, now, selection, select, toggle, tool, setTool, prototype, hotspots, play, playerOpen, camera, setCamera, flyTo, showResult, fit, frameGesture, interactId, layers, element, toFrame, draft, openThread, threadInPanel, setOpenThread, openLoupe, addFrame, openWebsite, saveComponent, editComponent, insertHtml, toast, openMenu, confirm],
   )
+
+  useWebMcp(value)
 
   if (!value) {
     return (

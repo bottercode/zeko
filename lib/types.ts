@@ -35,6 +35,8 @@ export interface Frame {
   sheetRoute?: string
   /** frames sharing a deck id are variants of one another */
   deckId?: string
+  /** set on the main copy of a component: editing this frame updates every instance */
+  componentId?: string
   /** earlier HTML of a sketch, newest last */
   versions?: Version[]
   createdBy: Actor
@@ -150,7 +152,10 @@ export interface SketchComponent {
   id: string
   name: string
   tag: string
+  /** the main copy as a standalone document */
   html: string
+  /** the element each instance becomes; its root carries data-zeko-instance="<id>" */
+  body?: string
   w: number
   h: number
 }
@@ -219,6 +224,8 @@ export type Op =
   | { type: 'design.token.remove'; name: string }
   | { type: 'component.save'; component: SketchComponent }
   | { type: 'component.remove'; id: string }
+  /** Change a component's name or element; every instance follows. */
+  | { type: 'component.update'; id: string; name?: string; body?: string }
   | { type: 'frame.create'; frame: Omit<Frame, 'createdBy' | 'createdAt' | 'updatedAt'> }
   | { type: 'frame.update'; id: string; patch: FramePatch }
   | { type: 'frame.delete'; id: string }

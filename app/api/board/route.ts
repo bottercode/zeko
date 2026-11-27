@@ -21,6 +21,7 @@ const HUMAN_OPS = new Set<Op['type']>([
   'design.token.remove',
   'component.save',
   'component.remove',
+  'component.update',
   'frame.create',
   'frame.update',
   'frame.delete',

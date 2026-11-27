@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { newId } from '@/lib/client/useBoard'
 import { DEFAULT_THEME, defaultDesign, tokenLabels, tokenValue, validTokenName, validTokenValue } from '@/lib/tokens'
@@ -10,6 +10,7 @@ import { ChoiceSelect } from './ChoiceSelect'
 import { Input } from './ui/input'
 import { useStudio } from './studio-context'
 import { Separator } from './ui/separator'
+import { ColorPicker } from './ColorPicker'
 
 const field = 'h-8 min-w-0 rounded-md border border-hair bg-panel px-2 text-sm focus-visible:outline focus-visible:outline-grease'
 
@@ -21,6 +22,18 @@ export function TokensPanel() {
   const [kind, setKind] = useState<TokenKind>('color')
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  // A color drag sends many values; save the last one once the pointer rests, so it becomes one undo step.
+  const pending = useRef<{ timer: number; name: string } | null>(null)
+  const setColor = (name: string, next: string) => {
+    if (pending.current) window.clearTimeout(pending.current.timer)
+    pending.current = {
+      name,
+      timer: window.setTimeout(() => {
+        pending.current = null
+        dispatch({ type: 'design.token.set', name, kind: 'color', themeId: design.themeId, value: next })
+      }, 160),
+    }
+  }
 
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
@@ -73,6 +86,14 @@ export function TokensPanel() {
                 <span className="truncate font-mono text-xs">--{token.name}</span>
                 <IconButton label={`Remove token --${token.name}`} onClick={() => dispatch({ type: 'design.token.remove', name: token.name })}><Trash2 size={13} /></IconButton>
               </div>
+              <div className="flex items-center gap-1.5">
+              {token.kind === 'color' && (
+                <span className="inspector-swatch relative size-8 shrink-0 overflow-hidden rounded-md border border-hair" style={{ background: own || fallback }}>
+                  <ColorPicker label={`--${token.name}`} value={own || fallback || '#000000'} onChange={(next) => setColor(token.name, next)}>
+                    <span className="sr-only">{own || fallback}</span>
+                  </ColorPicker>
+                </span>
+              )}
               <Input
                 key={`${design.themeId}:${own}`}
                 aria-label={`Value for --${token.name}`}
@@ -91,6 +112,7 @@ export function TokensPanel() {
                   dispatch({ type: 'design.token.set', name: token.name, kind: token.kind, themeId: design.themeId, value: next })
                 }}
               />
+              </div>
             </li>
           )
         })}

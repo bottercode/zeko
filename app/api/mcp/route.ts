@@ -8,7 +8,12 @@ import * as store from '@/lib/server/store'
 import type { Actor, Board, Frame, Task } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
 import { inspect, screenshot } from '@/lib/server/render'
-import { editLayers, inspectLayers, layerRevision } from '@/lib/server/layers'
+import { componentFromLayer, editLayers, inspectLayers, layerAttributes, layerRevision } from '@/lib/server/layers'
+import { checkSvg, compactImage, readSourceImage, sanitizeSvg } from '@/lib/server/assets'
+import { snapshotPage } from '@/lib/server/snapshot'
+import { SHADER_PRESETS, shaderLayerHtml, type ShaderPreset } from '@/lib/shaders'
+import { componentDocument, countInstances } from '@/lib/components'
+import { codeNotes, frameCode } from '@/lib/code'
 import { MCP_AGENT_HEADER } from '@/lib/auth-access'
 import { DESIGN_BRIEF } from '@/lib/design-brief'
 
@@ -40,7 +45,17 @@ How to work:
 4. Prototypes: make an element open another screen with data-zeko-goto="<frame id>" on it, or
    data-zeko-goto="back" to return. The person plays the screens from the board's start screen (flowStart).
    Frames with a "shape" are drawings on the canvas, not screens.
-5. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.
+5. Images and drawings: Zeko makes none itself. Draw icons, illustrations and logos as SVG yourself and add them with
+   place_svg. Make or find images with your own tools, then add them with place_image (a data URL or https address);
+   to rework one, get_image shows you the current picture. Prefer real assets to placeholder boxes. add_shader adds an animated layer (mesh gradient, liquid, grain gradient,
+   paper texture, halftone dots) that can be clipped, masked, rounded and blended with CSS like any element.
+6. Components: create_component turns a layer into a reusable component; insert_component places instances;
+   update_component changes the main copy and every instance follows. Reuse the board's components before
+   drawing a repeated element again.
+7. snapshot_url captures a live webpage as an editable sketch. get_frame_code hands a frame to implementation:
+   its HTML or a React component, plus the tokens, fonts, images and components it relies on. When implementing
+   a frame in a codebase, map those to the project's own theme, components and assets instead of pasting the markup.
+8. Finish with complete_task (one or two sentences on what changed and the IDs of the resulting frames) and answer comments with reply_to_comment.
 
 ${DESIGN_BRIEF}`
 
@@ -92,13 +107,18 @@ const layerHtml = z.string().trim().min(1).max(100_000)
 const layerPlacement = { parent_path: layerPath.optional(), before_path: layerPath.optional() }
 const layerStyles = z.record(z.string().max(80).regex(/^(?:--[a-zA-Z0-9_-]+|-?[a-z][a-z0-9-]*)$/), z.string().max(2400).nullable())
   .refine((styles) => Object.keys(styles).length <= 40, 'Use up to 40 CSS properties per layer.')
+const ATTRS_SCHEMA = z.record(z.string().max(80).regex(/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/), z.string().max(4_000_000).nullable())
+  .refine((attrs) => Object.keys(attrs).length <= 20, 'Use up to 20 attributes per layer.')
 const layerEdits = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('update'), path: layerPath, text: z.string().max(8000).optional(), styles: layerStyles.optional() }),
+  z.object({ op: z.literal('update'), path: layerPath, text: z.string().max(8000).optional(), styles: layerStyles.optional(), attrs: ATTRS_SCHEMA.optional() }),
   z.object({ op: z.literal('insert'), html: layerHtml, ...layerPlacement }),
   z.object({ op: z.literal('move'), path: layerPath, ...layerPlacement }),
   z.object({ op: z.literal('replace'), path: layerPath, html: layerHtml }),
   z.object({ op: z.literal('remove'), path: layerPath }),
 ])
+
+const cssColor = z.string().trim().min(1).max(120).regex(/^[#\w\s(),.%/-]+$/, 'Use a CSS color such as #ff8a5b, oklch(70% 0.15 40) or var(--brand).')
+const inlineCss = z.string().max(2000).regex(/^[^<>"{}]*$/, 'Use plain CSS declarations.')
 
 function text(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] }
@@ -171,6 +191,11 @@ const handler = createMcpHandler(
           guidelines: designGuidelines(board) || 'None yet. Ask the person, or infer from existing frames and save them with update_guidelines.',
           skills: (board.skills ?? []).map(({ id, title, description }) => ({ id, title, description })),
           design: board.design ?? defaultDesign,
+          components: (board.components ?? []).map((c) => ({
+            id: c.id, name: c.name, tag: c.tag,
+            mainFrameId: board.frames.find((f) => f.componentId === c.id)?.id ?? null,
+            instances: board.frames.reduce((n, f) => n + (f.componentId ? 0 : countInstances(f.html, c.id)), 0),
+          })),
           frames: visibleFrames(board).map((f) => summarizeFrame(board, f)),
           references: board.frames.filter((f) => f.reference).map((f) => summarizeFrame(board, f)),
           approvedFrames: board.frames.filter((f) => f.approved).map((f) => summarizeFrame(board, f)),
@@ -286,7 +311,7 @@ const handler = createMcpHandler(
       'edit_layers',
       {
         title: 'Edit sketch layers',
-        description: 'Batch changes to individual layers of a sketch as one saved version. Update text or kebab-case CSS properties (null clears an inline property), insert or replace HTML, move, or remove a layer. Use the revision and paths from get_layers. Every path refers to the original tree for that revision. For insert and move, omit parent_path to use the body and omit before_path to append. Refresh the layer tree after a structural edit.',
+        description: 'Batch changes to individual layers of a sketch as one saved version. Update text, kebab-case CSS properties (null clears an inline property) or attributes such as src, alt, href and data-* (null removes one), insert or replace HTML, move, or remove a layer. Use the revision and paths from get_layers. Every path refers to the original tree for that revision. For insert and move, omit parent_path to use the body and omit before_path to append. Refresh the layer tree after a structural edit.',
         inputSchema: z.object({ frame_id: z.string(), revision: z.string().regex(/^[a-f0-9]{64}$/), edits: z.array(layerEdits).min(1).max(60) }),
       },
       async ({ frame_id, revision, edits }: { frame_id: string; revision: string; edits: z.infer<typeof layerEdits>[] }, ctx: Ctx) => {
@@ -529,6 +554,335 @@ const handler = createMcpHandler(
         if (f.createdBy.kind !== 'agent' || f.createdBy.name !== actor.name) return fail(`${f.name} was made by ${f.createdBy.name}. Ask them before removing it.`)
         dispatch({ type: 'frame.delete', id: f.id }, actor)
         return text('Deleted.')
+      },
+    )
+
+
+    /** Puts HTML into a sketch as a new layer, reading the sketch as it is now, and returns the new layer's path. */
+    async function insertLayer(frameId: string, html: string, placement: { parent_path?: string; before_path?: string }, actor: Actor, status: string) {
+      const frame = getBoard().frames.find((f) => f.id === frameId)
+      if (!frame || frame.kind !== 'sketch' || frame.html === undefined) throw new Error(`No sketch ${frameId}.`)
+      const source = frame.html
+      const result = await editLayers(source, [{ op: 'insert', html, ...placement }])
+      if (getBoard().frames.find((f) => f.id === frameId)?.html !== source) throw new Error('The sketch changed meanwhile. Call get_layers and try again.')
+      if (result.html.length > 2_000_000) throw new Error('That sketch would be over 2 MB. Use a smaller image or split the design across frames.')
+      dispatch({ type: 'frame.update', id: frameId, patch: { html: result.html } }, actor)
+      touch(actor, status, frameId, false)
+      return result.paths[0] ?? null
+    }
+
+    async function updateLayer(frameId: string, path: string, attrs: Record<string, string | null>, actor: Actor, status: string) {
+      const frame = getBoard().frames.find((f) => f.id === frameId)
+      if (!frame || frame.kind !== 'sketch' || frame.html === undefined) throw new Error(`No sketch ${frameId}.`)
+      const source = frame.html
+      const result = await editLayers(source, [{ op: 'update', path, attrs }])
+      if (getBoard().frames.find((f) => f.id === frameId)?.html !== source) throw new Error('The sketch changed meanwhile. Call get_layers and try again.')
+      if (result.html.length > 2_000_000) throw new Error('That sketch would be over 2 MB. Use a smaller image.')
+      dispatch({ type: 'frame.update', id: frameId, patch: { html: result.html } }, actor)
+      touch(actor, status, frameId, false)
+    }
+
+    const sketch = (frameId: string) => {
+      const frame = getBoard().frames.find((f) => f.id === frameId)
+      return frame && frame.kind === 'sketch' && frame.html !== undefined ? frame : undefined
+    }
+    const failure = (error: unknown, fallback: string) => fail(error instanceof Error ? error.message : fallback)
+    const escapeAttr = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+
+    server.registerTool(
+      'place_image',
+      {
+        title: 'Place image',
+        description: 'Add an image you made or found with your own tools. src is a data URL (data:image/png;base64,…) or an https address; it is compressed and stored in the sketch. With frame_id and path, replace that <img> layer’s picture. With frame_id alone, add a new <img> layer (parent_path and before_path place it, as in edit_layers). Without frame_id, add the image as its own frame.',
+        inputSchema: z.object({
+          src: z.string().min(1).max(16_000_000),
+          frame_id: z.string().optional(),
+          path: layerPath.optional(),
+          parent_path: layerPath.optional(),
+          before_path: layerPath.optional(),
+          width: z.number().int().min(16).max(4000).default(1024),
+          height: z.number().int().min(16).max(4000).default(768),
+          alt: z.string().max(300).default(''),
+          name: z.string().min(1).max(120).optional(),
+          page_id: z.string().optional(),
+        }),
+      },
+      async (args: { src: string; frame_id?: string; path?: string; parent_path?: string; before_path?: string; width: number; height: number; alt: string; name?: string; page_id?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const target = args.frame_id ? sketch(args.frame_id) : undefined
+        if (args.frame_id && !target) return fail(`No sketch ${args.frame_id}.`)
+        try {
+          if (target && args.path) {
+            const layer = await layerAttributes(target.html!, args.path)
+            if (layer.tag !== 'img') return fail(`Layer ${args.path} is a <${layer.tag}>. Pass the path of an <img>, or leave path out and use parent_path to add one.`)
+          }
+          const image = await readSourceImage(args.src.trim())
+          if (!/^image\/(png|jpe?g|webp|gif|avif|svg\+xml)$/.test(image.mediaType)) return fail(`Use a PNG, JPEG, WebP, GIF, AVIF or SVG image, not ${image.mediaType}.`)
+          const src = await compactImage(image, args.width, args.height)
+          if (target && args.path) {
+            await updateLayer(target.id, args.path, { src, ...(args.alt ? { alt: args.alt } : {}) }, actor, 'Placed an image')
+            return text({ frame_id: target.id, path: args.path })
+          }
+          if (target) {
+            const path = await insertLayer(target.id, `<img src="${src}" alt="${escapeAttr(args.alt)}" style="display:block;width:100%;max-width:${args.width}px;height:auto;object-fit:cover">`,
+              { parent_path: args.parent_path, before_path: args.before_path }, actor, 'Placed an image')
+            return text({ frame_id: target.id, path })
+          }
+          const board = getBoard()
+          const pageId = targetPage(board, actor, args.page_id)
+          if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
+          const id = nanoid(10)
+          const html = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;height:100vh"><img src="${src}" alt="${escapeAttr(args.alt)}" style="display:block;width:100%;height:100%;object-fit:cover"></body></html>`
+          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? 'Image', html, w: args.width, h: args.height, ...freeSpot(board, pageId) } }, actor)
+          touch(actor, 'Placed an image', id, false)
+          return text({ frame_id: id })
+        } catch (error) {
+          return failure(error, 'Could not place the image.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'get_image',
+      {
+        title: 'Get image',
+        description: 'See the picture in an <img> layer, to describe it or rework it with your own tools before placing the result with place_image.',
+        inputSchema: z.object({ frame_id: z.string(), path: layerPath }),
+      },
+      async (args: { frame_id: string; path: string }) => {
+        const target = sketch(args.frame_id)
+        if (!target) return fail(`No sketch ${args.frame_id}.`)
+        try {
+          const layer = await layerAttributes(target.html!, args.path)
+          if (layer.tag !== 'img' || !layer.attrs.src) return fail(`Layer ${args.path} is not an image with a src.`)
+          const image = await readSourceImage(layer.attrs.src)
+          if (!/^image\/(png|jpe?g|webp|gif)$/.test(image.mediaType)) return text({ src: layer.attrs.src.slice(0, 2000), note: `The image is ${image.mediaType}, which can’t be shown inline.` })
+          return {
+            content: [
+              { type: 'image' as const, data: Buffer.from(image.data).toString('base64'), mimeType: image.mediaType },
+              { type: 'text' as const, text: JSON.stringify({ alt: layer.attrs.alt ?? '', mediaType: image.mediaType, bytes: image.data.byteLength }) },
+            ],
+          }
+        } catch (error) {
+          return failure(error, 'Could not read the image.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'place_svg',
+      {
+        title: 'Place SVG',
+        description: 'Add an icon, logo, illustration or pattern you drew as SVG. Scripts, event handlers and external references are removed. With frame_id and path, replace that layer; otherwise add a layer (parent_path and before_path place it). Use a viewBox, and currentColor for icons that should follow the text color.',
+        inputSchema: z.object({
+          svg: z.string().min(1).max(400_000),
+          frame_id: z.string(),
+          path: layerPath.optional(),
+          parent_path: layerPath.optional(),
+          before_path: layerPath.optional(),
+          width: z.number().int().min(4).max(4000).default(240),
+          height: z.number().int().min(4).max(4000).default(240),
+        }),
+      },
+      async (args: { svg: string; frame_id: string; path?: string; parent_path?: string; before_path?: string; width: number; height: number }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        if (!sketch(args.frame_id)) return fail(`No sketch ${args.frame_id}.`)
+        try {
+          const clean = sanitizeSvg(args.svg)
+          await checkSvg(clean)
+          const sized = clean.replace(/<svg/i, `<svg style="display:block;width:${args.width}px;height:${args.height}px;max-width:100%"`)
+          if (args.path) {
+            const frame = sketch(args.frame_id)!
+            const source = frame.html!
+            const result = await editLayers(source, [{ op: 'replace', path: args.path, html: sized }])
+            if (getBoard().frames.find((f) => f.id === frame.id)?.html !== source) return fail('The sketch changed meanwhile. Call get_layers and try again.')
+            dispatch({ type: 'frame.update', id: frame.id, patch: { html: result.html } }, actor)
+            touch(actor, 'Placed an SVG', frame.id, false)
+            return text({ frame_id: frame.id, path: args.path })
+          }
+          const path = await insertLayer(args.frame_id, sized, { parent_path: args.parent_path, before_path: args.before_path }, actor, 'Placed an SVG')
+          return text({ frame_id: args.frame_id, path })
+        } catch (error) {
+          return failure(error, 'Could not place the SVG.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'add_shader',
+      {
+        title: 'Add shader layer',
+        description: `Add an animated WebGL layer to a sketch: ${Object.entries(SHADER_PRESETS).map(([id, p]) => `${id} (${p.description})`).join('; ')}. It is a <canvas data-zeko-shader> element: size and place it with style, and clip, mask, round or blend it with CSS like any layer. Colors accept var(--token). speed 0 keeps a still frame. Change it later with edit_layers attrs (data-colors as "c1;c2;c3;c4", data-speed, data-scale, data-amount, data-grain, data-seed).`,
+        inputSchema: z.object({
+          frame_id: z.string(),
+          preset: z.enum(Object.keys(SHADER_PRESETS) as [ShaderPreset, ...ShaderPreset[]]),
+          colors: z.array(cssColor).min(1).max(4).optional(),
+          speed: z.number().min(0).max(3).optional(),
+          scale: z.number().min(0.25).max(4).optional(),
+          amount: z.number().min(0).max(1).optional(),
+          grain: z.number().min(0).max(1).optional(),
+          seed: z.number().min(0).max(1000).optional(),
+          style: inlineCss.default('display:block;width:100%;height:480px'),
+          parent_path: layerPath.optional(),
+          before_path: layerPath.optional(),
+        }),
+      },
+      async (args: { frame_id: string; preset: ShaderPreset; colors?: string[]; speed?: number; scale?: number; amount?: number; grain?: number; seed?: number; style: string; parent_path?: string; before_path?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        if (!sketch(args.frame_id)) return fail(`No sketch ${args.frame_id}.`)
+        const defaults = SHADER_PRESETS[args.preset].defaults
+        const params = {
+          preset: args.preset, colors: args.colors ?? defaults.colors, speed: args.speed ?? defaults.speed, scale: args.scale ?? defaults.scale,
+          amount: args.amount ?? defaults.amount, grain: args.grain ?? defaults.grain, seed: args.seed ?? defaults.seed,
+        }
+        try {
+          const path = await insertLayer(args.frame_id, shaderLayerHtml(params, args.style.replace(/;\s*$/, '')), { parent_path: args.parent_path, before_path: args.before_path }, actor, `Added a ${SHADER_PRESETS[args.preset].label.toLowerCase()}`)
+          return text({ frame_id: args.frame_id, path, note: 'Put content above it with position or a grid stack; screenshot_frame shows the CSS stand-in where WebGL is unavailable.' })
+        } catch (error) {
+          return failure(error, 'Could not add the shader.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'create_component',
+      {
+        title: 'Create component',
+        description: 'Turn a layer into a reusable component. Its look is captured with inline styles so it holds up in any sketch, and the layer becomes the first instance.',
+        inputSchema: z.object({ frame_id: z.string(), path: layerPath, name: z.string().min(1).max(120) }),
+      },
+      async (args: { frame_id: string; path: string; name: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const target = sketch(args.frame_id)
+        if (!target) return fail(`No sketch ${args.frame_id}.`)
+        const id = nanoid(10)
+        try {
+          const captured = await componentFromLayer(withDesignTokens(target.html!, getBoard().design), target, args.path, id)
+          dispatch({ type: 'component.save', component: { id, name: args.name, tag: captured.tag, body: captured.body, html: componentDocument(captured.body), w: captured.w, h: captured.h } }, actor)
+          await updateLayer(target.id, args.path, { 'data-zeko-instance': id }, actor, `Made ${args.name} a component`)
+          return text({ component_id: id })
+        } catch (error) {
+          return failure(error, 'Could not create the component.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'get_component',
+      {
+        title: 'Get component',
+        description: 'Read a component: the HTML each instance uses, its size and where it is used.',
+        inputSchema: z.object({ component_id: z.string() }),
+      },
+      async ({ component_id }: { component_id: string }) => {
+        const board = getBoard()
+        const component = board.components?.find((c) => c.id === component_id)
+        if (!component) return fail(`No component ${component_id}. Call get_board for component IDs.`)
+        return text({
+          id: component.id, name: component.name, tag: component.tag, size: `${component.w}x${component.h}`,
+          html: component.body ?? null,
+          mainFrameId: board.frames.find((f) => f.componentId === component.id)?.id ?? null,
+          usedIn: board.frames.filter((f) => !f.componentId && countInstances(f.html, component.id)).map((f) => ({ frame_id: f.id, name: f.name, instances: countInstances(f.html, component.id) })),
+        })
+      },
+    )
+
+    server.registerTool(
+      'insert_component',
+      {
+        title: 'Insert component',
+        description: 'Place an instance of a component in a sketch. parent_path and before_path place it, as in edit_layers. Instances follow their component when it changes.',
+        inputSchema: z.object({ frame_id: z.string(), component_id: z.string(), parent_path: layerPath.optional(), before_path: layerPath.optional() }),
+      },
+      async (args: { frame_id: string; component_id: string; parent_path?: string; before_path?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const component = getBoard().components?.find((c) => c.id === args.component_id)
+        if (!component?.body) return fail(`No component ${args.component_id} with an element to place. Call get_board for component IDs.`)
+        try {
+          const path = await insertLayer(args.frame_id, component.body, { parent_path: args.parent_path, before_path: args.before_path }, actor, `Placed ${component.name}`)
+          return text({ frame_id: args.frame_id, path })
+        } catch (error) {
+          return failure(error, 'Could not place the component.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'update_component',
+      {
+        title: 'Update component',
+        description: 'Change a component everywhere: html replaces the element every instance uses (one root element; keep inline styles so it works in any sketch), name renames it.',
+        inputSchema: z.object({ component_id: z.string(), html: z.string().min(1).max(500_000).optional(), name: z.string().min(1).max(120).optional() }),
+      },
+      async (args: { component_id: string; html?: string; name?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        const board = getBoard()
+        if (!board.components?.some((c) => c.id === args.component_id)) return fail(`No component ${args.component_id}.`)
+        if (!args.html && !args.name) return fail('Pass html, name, or both.')
+        if (args.html && !/^\s*<[a-zA-Z]/.test(args.html)) return fail('html must be one element, starting with its opening tag.')
+        dispatch({ type: 'component.update', id: args.component_id, name: args.name, body: args.html }, actor)
+        const after = getBoard()
+        const instances = after.frames.reduce((n, f) => n + (f.componentId ? 0 : countInstances(f.html, args.component_id)), 0)
+        touch(actor, 'Updated a component', undefined, false)
+        return text({ updated: true, instances })
+      },
+    )
+
+    server.registerTool(
+      'snapshot_url',
+      {
+        title: 'Snapshot webpage',
+        description: 'Capture a live webpage as an editable sketch: every element becomes a layer with its rendered styles written inline. Use it to iterate on an existing site or product screen. Pages behind a login are not reachable.',
+        inputSchema: z.object({
+          url: z.string().url().max(2048),
+          name: z.string().min(1).max(120).optional(),
+          width: z.number().int().min(320).max(2560).default(1280),
+          height: z.number().int().min(320).max(4000).default(800),
+          route: z.string().optional(),
+          page_id: z.string().optional(),
+        }),
+      },
+      async (args: { url: string; name?: string; width: number; height: number; route?: string; page_id?: string }, ctx: Ctx) => {
+        const actor = agentFrom(ctx.http?.req)
+        try {
+          touch(actor, `Capturing ${new URL(args.url).hostname}`, undefined, true)
+          const shot = await snapshotPage(args.url, args.width, args.height)
+          const board = getBoard()
+          const pageId = targetPage(board, actor, args.page_id)
+          if (!pageId) return fail(`No page ${args.page_id}. Call get_board for page IDs.`)
+          const id = nanoid(10)
+          dispatch({ type: 'frame.create', frame: { id, pageId, kind: 'sketch', name: args.name ?? shot.title, html: shot.html, w: args.width, h: Math.max(args.height, shot.height), route: args.route, ...freeSpot(board, pageId) } }, actor)
+          touch(actor, `Captured ${shot.title}`, id, false)
+          return text({ frame_id: id, title: shot.title, height: Math.max(args.height, shot.height) })
+        } catch (error) {
+          touch(actor, 'Snapshot failed', undefined, false)
+          return failure(error, 'Could not capture that page.')
+        }
+      },
+    )
+
+    server.registerTool(
+      'get_frame_code',
+      {
+        title: 'Get frame code',
+        description: 'Hand a sketch to implementation: its HTML or a React component (JSX with style objects), with the canvas tokens defined, plus notes on the fonts, design tokens, images, shaders and components it relies on. Map those to the codebase’s own theme, components and assets rather than pasting the markup as is.',
+        inputSchema: z.object({ frame_id: z.string(), format: z.enum(['html', 'react']).default('react') }),
+      },
+      async (args: { frame_id: string; format: 'html' | 'react' }) => {
+        const board = getBoard()
+        const frame = board.frames.find((f) => f.id === args.frame_id)
+        if (!frame || frame.kind !== 'sketch' || frame.html === undefined) return fail(`No sketch ${args.frame_id}.`)
+        const notes = codeNotes(frame.html)
+        return text({
+          frame: summarizeFrame(board, frame),
+          format: args.format,
+          code: frameCode(frame.html, frame.name, board.design, args.format),
+          tokens: (board.design?.tokens ?? []).filter((token) => notes.tokens.includes(token.name)),
+          fonts: notes.fonts,
+          images: { embedded: notes.embeddedImages, linked: notes.linkedImages, note: notes.embeddedImages ? 'Embedded images are data URLs: save them as asset files in the project.' : undefined },
+          shaders: notes.shaders.length ? { presets: notes.shaders, note: 'Shader layers are drawn by the inline zeko-shaders script; port it or replace them with the project’s own effect.' } : undefined,
+          components: notes.componentIds.map((id) => ({ id, name: board.components?.find((c) => c.id === id)?.name })).filter((c) => c.name),
+        })
       },
     )
 

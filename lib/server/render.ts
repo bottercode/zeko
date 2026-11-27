@@ -62,6 +62,28 @@ export async function withSketchPage<T>(fn: (page: Page) => Promise<T>): Promise
   }
 }
 
+/**
+ * A page that may load the web, for capturing live sites. Every request passes the guard first, so a page
+ * cannot reach addresses the guard refuses, including through redirects or its own subresources.
+ */
+export async function withWebPage<T>(guard: (url: string) => Promise<boolean>, fn: (page: Page) => Promise<T>): Promise<T> {
+  const b = await browser()
+  const context = await b.createBrowserContext()
+  try {
+    const page = await context.newPage()
+    await page.setRequestInterception(true)
+    page.on('request', (request) => {
+      if (request.isInterceptResolutionHandled()) return
+      const url = request.url()
+      if (/^(?:data:|blob:|about:blank$)/.test(url)) return void request.continue().catch(() => undefined)
+      void guard(url).then((ok) => (ok ? request.continue() : request.abort('blockedbyclient'))).catch(() => request.abort().catch(() => undefined))
+    })
+    return await fn(page)
+  } finally {
+    await context.close().catch(() => undefined)
+  }
+}
+
 async function withPage<T>(html: string, width: number, height: number, scale: number, fn: (page: Page) => Promise<T>): Promise<T> {
   return withSketchPage(async (page) => {
     await page.setViewport({ width: Math.round(width), height: Math.round(height), deviceScaleFactor: scale })

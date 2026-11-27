@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useState } from 'react'
 import {
-  Braces, Check, ClipboardCheck, Copy, Download, ExternalLink, Frame as FrameIcon, Globe, History, Info, Link2,
+  Braces, Camera, Check, ClipboardCheck, Code2, Copy, Download, ExternalLink, FileCode, Frame as FrameIcon, Globe, History, Info, Link2, Palette,
   Layers, MousePointerClick, PanelTop, PencilRuler, Play, Radio, Route, Scan, Shapes, Trash2, Type,
 } from 'lucide-react'
 import { LIVE_FRAMES } from '@/lib/features'
@@ -19,7 +19,7 @@ import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { SIZES, useStudio } from './studio-context'
-import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from './ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 const VersionHistoryDialog = dynamic(() => import('./VersionHistoryDialog').then((module) => module.VersionHistoryDialog))
 
@@ -71,6 +71,11 @@ function OneFrame({ frame }: { frame: Frame }) {
             <Button size="sm" variant="outline" onClick={() => openWebsite(frame.id)}><Link2 data-icon="inline-start" aria-hidden /> Edit URL</Button>
             {sourceUrl && <Button size="sm" variant="ghost" onClick={() => act.openInTab(frame)}><ExternalLink data-icon="inline-start" aria-hidden /> Open in browser</Button>}
           </div>
+          {sourceUrl && (
+            <Button size="sm" variant="secondary" className="self-start" onClick={() => void act.snapshot(frame)}>
+              <Camera data-icon="inline-start" aria-hidden /> Snapshot as editable sketch
+            </Button>
+          )}
         </InspectorSection>
       )}
       <InspectorSection title="Position & size" icon={PanelTop}>
@@ -155,6 +160,18 @@ function OneFrame({ frame }: { frame: Frame }) {
             <Button variant="outline" size="sm" onClick={() => act.exportHtml(frame)}>HTML</Button>
             <Button variant="outline" size="sm" onClick={() => act.exportPdf(frame)}>PDF</Button>
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="secondary" size="sm" className="w-full" />}>
+              <Code2 data-icon="inline-start" aria-hidden /> Copy as code
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => void act.copyCode(frame, 'html')}><FileCode aria-hidden /> HTML</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void act.copyCode(frame, 'react')}><Code2 aria-hidden /> React component (JSX)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void act.copyCode(frame, 'tokens')}><Palette aria-hidden /> Tokens as CSS variables</DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </InspectorSection>
       )}
       {versions > 0 && (

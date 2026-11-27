@@ -2,8 +2,8 @@
 
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowDown, ArrowLeft, ArrowUp, Boxes,
-  Copy, Image as ImageIcon, MousePointerClick, Palette, PanelTop, Plus, Route,
-  Square, Trash2, Type, X,
+  Braces, Code2, Copy, FileCode, Image as ImageIcon, MousePointerClick, Palette, PanelTop, Plus, Route,
+  Sparkles, Square, Trash2, Type, X,
 } from 'lucide-react'
 import type { ElementInfo } from '@/lib/client/bridge'
 import { useStudio } from './studio-context'
@@ -18,6 +18,11 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 import { ChoiceSelect } from './ChoiceSelect'
 import { InspectorMenu, InspectorSection, InspectorViews, NumberProperty, PropertyRow, SelectionHeader } from './InspectorUI'
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from './ui/dropdown-menu'
+import { ColorPicker, readTokenColor, tokenColor } from './ColorPicker'
+import { formatHex, gamutOf, parseColor } from '@/lib/color'
+import { copyToClipboard, elementCode } from '@/lib/client/copy-code'
+import { EffectsSection, FontFamilyRow, InstanceSection, ShaderSection, TextStyleRow, newShaderHtml } from './ElementSections'
+import { DropdownMenuLabel } from './ui/dropdown-menu'
 
 const px = (value: string) => /^-?\d+(\.\d+)?px$/.test(value) ? String(Math.round(parseFloat(value) * 100) / 100) : value
 const numeric = /^-?\d+(\.\d+)?$/
@@ -25,9 +30,8 @@ const choice = (values: readonly string[], current: string) =>
   [...new Set([...values, ...(current ? [current] : [])])].map((value) => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) }))
 
 export function ElementInspector({ el }: { el: ElementInfo }) {
-  const { toFrame, saveComponent, prototype, board, interactId } = useStudio()
+  const { toFrame, saveComponent, prototype, board, interactId, insertHtml, toast } = useStudio()
   const frame = board.frames.find((item) => item.id === interactId)
-  const colorTokens = board.design?.tokens.filter((token) => token.kind === 'color') ?? []
   const screens = board.frames.filter((item) => item.kind === 'sketch' && !item.shape && item.id !== interactId)
   const style = (patch: Record<string, string>) => toFrame({ type: 'apply', path: el.path, style: patch })
   const attr = (name: string, value: string) => toFrame({ type: 'apply', path: el.path, attrs: { [name]: value } })
@@ -37,9 +41,17 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
   const hasBorder = !!el.style.borderStyle && el.style.borderStyle !== 'none' && el.style.borderStyle !== 'hidden'
   const clips = [el.style.overflowX, el.style.overflowY].every((value) => value === 'hidden' || value === 'clip')
   const move = (dir: -1 | 1) => toFrame({ type: 'move', path: el.path, dir })
+  const copyCode = async (format: 'html' | 'react' | 'css') => {
+    const code = frame?.html ? elementCode(frame.html, el.path, format) : null
+    if (!code) return toast('Couldn’t read this element. Try again in a moment.')
+    await copyToClipboard(code)
+    toast(format === 'react' ? 'Copied as JSX' : format === 'css' ? 'Copied CSS' : 'Copied HTML')
+  }
 
   const styleView = (
     <>
+      {el.instance && <InstanceSection el={el} />}
+      {el.shader && <ShaderSection el={el} ColorRow={ColorRow} />}
       {(el.text !== null || el.tag === 'img') && (
         <InspectorSection title="Content" icon={el.tag === 'img' ? ImageIcon : Type}>
           {el.text !== null && (
@@ -58,15 +70,23 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
               className="h-auto resize-y"
             />
           )}
-          {el.tag === 'img' && <AttributeField label="Image source" value={el.src ?? ''} onCommit={(value) => attr('src', value)} />}
+          {el.tag === 'img' && (
+            <>
+              <AttributeField label="Image source" value={el.src?.startsWith('data:') ? '' : el.src ?? ''} onCommit={(value) => value && attr('src', value)} />
+              <AttributeField label="Alt text" value={el.alt ?? ''} onCommit={(value) => attr('alt', value)} />
+              <PropertyRow label="Fit">
+                <ChoiceSelect label="Image fit" value={el.style.objectFit} className="w-full"
+                  options={choice(['fill', 'cover', 'contain', 'none', 'scale-down'], el.style.objectFit)}
+                  onChange={(value) => style({ 'object-fit': value })} />
+              </PropertyRow>
+            </>
+          )}
         </InspectorSection>
       )}
 
       {typographic && (
         <InspectorSection title="Typography" icon={Type}>
-          <AttributeField label="Font family" value={el.style.fontFamily} onCommit={(value) => {
-            if (CSS.supports('font-family', value)) style({ 'font-family': value })
-          }} />
+          <FontFamilyRow el={el} style={style} />
           <PropertyRow label="Weight">
             <ChoiceSelect label="Font weight" value={el.style.fontWeight} className="w-full"
               options={[...new Set(['300', '400', '500', '600', '700', '800', el.style.fontWeight])].map((value) => ({
@@ -74,6 +94,7 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
               }))}
               onChange={(value) => style({ 'font-weight': value })} />
           </PropertyRow>
+          <TextStyleRow el={el} style={style} />
           <div className="grid grid-cols-3 gap-1.5">
             <CssNumber label="Size" property="font-size" value={el.style.fontSize} onStyle={style} />
             <CssNumber label="Line height" property="line-height" value={el.style.lineHeight} onStyle={style} />
@@ -90,19 +111,12 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
               ))}
             </ToggleGroup>
           </PropertyRow>
-          <ColorRow label="Text color" value={el.style.color} onCommit={(value) => style({ color: value })} />
+          <ColorRow label="Text color" value={el.style.color} inline={el.inline.color} onCommit={(value) => style({ color: value })} />
         </InspectorSection>
       )}
 
       <InspectorSection title="Appearance" icon={Palette}>
-        <ColorRow label="Fill" value={el.style.backgroundColor} onCommit={(value) => style({ 'background-color': value })} clearable />
-        {colorTokens.length > 0 && (
-          <PropertyRow label="Fill token">
-            <ChoiceSelect label="Fill token" placeholder="Choose a color token…" value={null} className="w-full"
-              options={colorTokens.map((token) => ({ value: token.name, label: `--${token.name}` }))}
-              onChange={(value) => style({ 'background-color': `var(--${value})` })} />
-          </PropertyRow>
-        )}
+        <ColorRow label="Fill" value={el.style.backgroundColor} inline={el.inline.backgroundColor} onCommit={(value) => style({ 'background-color': value })} clearable />
         <div className="grid grid-cols-2 gap-2">
           <CssNumber label="Corner radius" property="border-radius" value={el.style.borderRadius} onStyle={style} />
           <NumberProperty label="Opacity" value={String(Math.round(Number(el.style.opacity) * 100))} unit="%"
@@ -110,6 +124,8 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
             onCommit={(value) => style({ opacity: String(Number(value) / 100) })} />
         </div>
       </InspectorSection>
+
+      <EffectsSection el={el} style={style} />
 
       <InspectorSection title="Border" icon={Square}>
         <PropertyRow label="Style">
@@ -120,7 +136,7 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
         {hasBorder && (
           <>
             <CssNumber label="Border width" property="border-width" value={el.style.borderWidth} onStyle={style} />
-            <ColorRow label="Border color" value={el.style.borderColor} onCommit={(value) => style({ 'border-color': value })} />
+            <ColorRow label="Border color" value={el.style.borderColor} inline={el.inline.borderColor} onCommit={(value) => style({ 'border-color': value })} />
           </>
         )}
       </InspectorSection>
@@ -212,6 +228,9 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
               <Icon data-icon="inline-start" aria-hidden /> {label}
             </Button>
           ))}
+          <Button variant="outline" size="sm" className="justify-start" onClick={() => insertHtml(newShaderHtml())}>
+            <Sparkles data-icon="inline-start" aria-hidden /> Shader
+          </Button>
         </div>
       </InspectorSection>
     </>
@@ -233,6 +252,13 @@ export function ElementInspector({ el }: { el: ElementInfo }) {
                 <DropdownMenuItem onClick={() => move(-1)}><ArrowUp aria-hidden /> Move up</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => move(1)}><ArrowDown aria-hidden /> Move down</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => toFrame({ type: 'duplicate', path: el.path })}><Copy aria-hidden /> Duplicate</DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Copy as code</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => void copyCode('html')}><FileCode aria-hidden /> HTML</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void copyCode('react')}><Code2 aria-hidden /> React (JSX)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void copyCode('css')}><Braces aria-hidden /> CSS</DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
@@ -285,24 +311,23 @@ function AttributeField({ label, value, onCommit }: { label: string; value: stri
   )
 }
 
-function ColorRow({ label, value = '', onCommit, clearable }: { label: string; value: string; onCommit: (value: string) => void; clearable?: boolean }) {
-  const rgba = value.match(/rgba?\(([^)]+)\)/)?.[1]?.split(/[\s,/]+/).filter(Boolean)
-  const alpha = rgba?.[3] === undefined ? 1 : Number(rgba[3])
-  const hex = rgba?.length && rgba.length >= 3
-    ? '#' + rgba.slice(0, 3).map((channel) => Math.round(Number(channel)).toString(16).padStart(2, '0')).join('')
-    : /^#[0-9a-f]{6}$/i.test(value) ? value : '#ffffff'
-  const transparent = value === 'transparent' || alpha === 0
-  const display = transparent ? '' : rgba && alpha === 1 ? hex : value
+function ColorRow({ label, value = '', inline, onCommit, clearable }: { label: string; value: string; inline?: string; onCommit: (value: string) => void; clearable?: boolean }) {
+  const { board } = useStudio()
+  const design = board.design
+  const token = inline ? readTokenColor(inline) : null
+  const parsed = parseColor(value)
+  const transparent = value === 'transparent' || parsed?.a === 0
+  const display = token ? (token.opacity < 100 ? `--${token.name} ${token.opacity}%` : `--${token.name}`) : transparent ? '' : parsed && parsed.a === 1 && gamutOf(parsed) === 'srgb' && /^rgb/.test(value) ? formatHex(parsed) : value
   return (
     <PropertyRow label={label}>
       <InputGroup>
         <InputGroupAddon>
-          <label className="inspector-swatch relative size-5 overflow-hidden rounded-sm border border-input focus-within:ring-1 focus-within:ring-ring"
+          <span className="inspector-swatch relative size-5 overflow-hidden rounded-sm border border-input focus-within:ring-1 focus-within:ring-ring"
             style={transparent ? undefined : { background: value }}>
-            <input type="color" aria-label={`Choose ${label.toLowerCase()}`} value={hex}
-              onChange={(event) => onCommit(event.currentTarget.value)}
-              className="absolute inset-0 size-full cursor-pointer opacity-0" />
-          </label>
+            <ColorPicker label={label} value={inline || value} onChange={onCommit} tokens={design?.tokens} themeId={design?.themeId}>
+              <span className="sr-only">{display || 'None'}</span>
+            </ColorPicker>
+          </span>
         </InputGroupAddon>
         <InputGroupInput aria-label={`${label} value`} name={label} key={display} defaultValue={display} placeholder="None"
           spellCheck={false} autoComplete="off" className="min-w-0 font-mono text-xs"
@@ -310,7 +335,9 @@ function ColorRow({ label, value = '', onCommit, clearable }: { label: string; v
             const input = event.currentTarget
             const next = input.value.trim()
             if (next === display) return
+            const named = /^--([a-z][a-z0-9-]*)(?:\s+(\d+(?:\.\d+)?)%)?$/.exec(next)
             if (!next && clearable) onCommit('transparent')
+            else if (named && design?.tokens.some((t) => t.name === named[1])) onCommit(tokenColor(named[1]!, named[2] ? Number(named[2]) : 100))
             else if (CSS.supports('color', next)) onCommit(next)
             else input.value = display
           }}

@@ -6,6 +6,7 @@
 
 import { TOKEN_STYLE_ID } from '../tokens'
 import { LAYER_IGNORED_IDS, LAYER_IGNORED_TAGS } from '../sketch-layers'
+import { SHADER_ATTR, SHADER_RUNTIME_ID, shaderRuntimeTag } from '../shaders'
 
 export const BRIDGE_ID = LAYER_IGNORED_IDS[0]!
 export const STREAM_MARKER = '<!-- zeko:stream -->'
@@ -14,7 +15,9 @@ export interface LayerNode {
   path: string
   tag: string
   name: string
-  kind: 'text' | 'image' | 'button' | 'link' | 'input' | 'box' | 'svg'
+  kind: 'text' | 'image' | 'button' | 'link' | 'input' | 'box' | 'svg' | 'shader'
+  /** set on the root of a component instance */
+  instance?: string
   children: LayerNode[]
 }
 
@@ -54,8 +57,22 @@ export interface ElementInfo {
     overflowY: string
     width: string
     height: string
+    fontStyle: string
+    textDecorationLine: string
+    textTransform: string
+    mixBlendMode: string
+    clipPath: string
+    maskImage: string
+    objectFit: string
   }
+  /** values written on the element itself, so token references such as var(--brand) stay visible */
+  inline: { color: string; backgroundColor: string; borderColor: string; fontFamily: string }
   src?: string
+  alt?: string
+  /** the component instance this element belongs to: its id and the instance root's path */
+  instance?: { id: string; path: string }
+  /** shader layer settings, from its data attributes */
+  shader?: Record<string, string>
   href?: string
   /** in a prototype: the screen a click on it opens, or "back" */
   goto?: string
@@ -88,6 +105,12 @@ export type ToFrame =
   | { type: 'duplicate'; path: string }
   | { type: 'insert'; path: string; kind: 'text' | 'box' | 'button' | 'image' }
   | { type: 'move'; path: string; dir: -1 | 1 }
+  /** Insert HTML inside the element at path (or the body when null), or right after it. */
+  | { type: 'insert-html'; path: string | null; html: string; position: 'inside' | 'after' }
+  /** Move a layer next to or into another layer, as dragging in the layers panel does. */
+  | { type: 'reparent'; path: string; target: string; position: 'before' | 'after' | 'inside' }
+  /** Load a web font in the sketch's head, once. */
+  | { type: 'ensure-font'; href: string }
 
 export type FromFrame =
   | { type: 'ready' }
@@ -95,6 +118,8 @@ export type FromFrame =
   | { type: 'tree'; tree: LayerNode[] }
   | { type: 'selected'; info: ElementInfo | null }
   | { type: 'component'; requestId: string; component: Omit<import('../types').SketchComponent, 'id'> | null }
+  /** a layer was dropped inside the sketch */
+  | { type: 'dropped'; path: string }
   | { type: 'html'; html: string }
   | { type: 'escape' }
   | { type: 'history'; redo: boolean }
@@ -104,6 +129,8 @@ export type FromFrame =
 /* The script below is plain browser JavaScript, kept dependency free. */
 const SCRIPT = String.raw`(() => {
   const [BRIDGE, OVERLAY] = ${JSON.stringify(LAYER_IGNORED_IDS)}, TOKENS = '${TOKEN_STYLE_ID}'
+  const SHADER = '${SHADER_ATTR}', SHADER_RUNTIME = '${SHADER_RUNTIME_ID}', RUNTIME_TAG = ${JSON.stringify(shaderRuntimeTag()).replace(/<\//g, '<\\/')}
+  const INLINE_TAGS = ['BR', 'B', 'I', 'U', 'S', 'EM', 'STRONG', 'SPAN', 'A', 'CODE', 'MARK', 'SMALL', 'SUB', 'SUP']
   const SKIP = new Set(${JSON.stringify(LAYER_IGNORED_TAGS)})
   let editing = false, selected = null, hovered = null, textEditing = null
   let streamedSections = ''
@@ -126,11 +153,13 @@ const SCRIPT = String.raw`(() => {
     for (const i of p.split('.').map(Number)) { el = kids(el)[i]; if (!el) return null }
     return el
   }
-  const onlyText = (el) => el.childNodes.length > 0 && [...el.childNodes].every((n) => n.nodeType === 3 || (n.nodeType === 1 && ['BR', 'B', 'I', 'EM', 'STRONG', 'SPAN', 'A'].includes(n.tagName) && n.children.length === 0))
+  const inlineOnly = (n) => n.nodeType === 3 || (n.nodeType === 1 && INLINE_TAGS.includes(n.tagName) && [...n.childNodes].every(inlineOnly))
+  const onlyText = (el) => el.childNodes.length > 0 && !['svg', 'canvas'].includes(el.localName) && [...el.childNodes].every(inlineOnly)
   const kindOf = (el) => {
     const t = el.tagName
     if (t === 'IMG' || t === 'PICTURE' || t === 'VIDEO') return 'image'
     if (t === 'SVG' || t === 'svg') return 'svg'
+    if (t === 'CANVAS' && el.hasAttribute(SHADER)) return 'shader'
     if (t === 'BUTTON') return 'button'
     if (t === 'A') return 'link'
     if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return 'input'
@@ -144,12 +173,17 @@ const SCRIPT = String.raw`(() => {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').slice(0, 40)
     if (el.classList.length) return '.' + [...el.classList].slice(0, 2).join('.')
     if (el.tagName === 'IMG') return el.getAttribute('alt') || 'image'
+    if (el.hasAttribute(SHADER)) return el.getAttribute(SHADER) + ' shader'
     return el.tagName.toLowerCase()
   }
   const tree = (el, path, depth) => kids(el).map((c, i) => {
     const p = path === '' ? String(i) : path + '.' + i
-    return { path: p, tag: c.tagName.toLowerCase(), name: nameOf(c), kind: kindOf(c), children: depth < 14 && kindOf(c) === 'box' ? tree(c, p, depth + 1) : [] }
+    return { path: p, tag: c.tagName.toLowerCase(), name: nameOf(c), kind: kindOf(c), instance: c.getAttribute('data-zeko-instance') || undefined, children: depth < 14 && kindOf(c) === 'box' ? tree(c, p, depth + 1) : [] }
   })
+  const instanceOf = (el) => {
+    const root = el.closest('[data-zeko-instance]')
+    return root && root !== document.body ? { id: root.getAttribute('data-zeko-instance'), path: pathOf(root) } : undefined
+  }
   const info = (el) => {
     if (!el || el === document.body) return null
     const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
@@ -165,9 +199,17 @@ const SCRIPT = String.raw`(() => {
         position: cs.position, flexDirection: cs.flexDirection, alignItems: cs.alignItems, justifyContent: cs.justifyContent,
         overflowX: cs.overflowX, overflowY: cs.overflowY,
         gap: cs.gap, display: cs.display, width: cs.width, height: cs.height,
+        fontStyle: cs.fontStyle, textDecorationLine: cs.textDecorationLine, textTransform: cs.textTransform,
+        mixBlendMode: cs.mixBlendMode, clipPath: cs.clipPath, maskImage: cs.maskImage || cs.webkitMaskImage || 'none', objectFit: cs.objectFit,
       },
-      src: el.getAttribute('src') || undefined, href: el.getAttribute('href') || undefined,
+      inline: {
+        color: el.style.getPropertyValue('color'), backgroundColor: el.style.getPropertyValue('background-color'),
+        borderColor: el.style.getPropertyValue('border-color'), fontFamily: el.style.getPropertyValue('font-family'),
+      },
+      src: el.getAttribute('src') || undefined, href: el.getAttribute('href') || undefined, alt: el.getAttribute('alt') ?? undefined,
       goto: el.getAttribute('data-zeko-goto') || undefined,
+      instance: instanceOf(el),
+      shader: el.hasAttribute(SHADER) ? Object.fromEntries([...el.attributes].filter((a) => a.name === SHADER || a.name.startsWith('data-')).map((a) => [a.name, a.value])) : undefined,
     }
   }
 
@@ -227,6 +269,12 @@ const SCRIPT = String.raw`(() => {
     const root = document.documentElement.cloneNode(true)
     root.querySelectorAll('#' + BRIDGE + ', #' + OVERLAY + ', #' + TOKENS).forEach((n) => n.remove())
     root.querySelectorAll('[contenteditable]').forEach((n) => n.removeAttribute('contenteditable'))
+    // Editing styles set on the page itself are not part of the sketch.
+    root.style.removeProperty('cursor')
+    root.style.removeProperty('user-select')
+    if (!root.getAttribute('style')) root.removeAttribute('style')
+    root.querySelectorAll('[data-zeko-dragging]').forEach((n) => { n.removeAttribute('data-zeko-dragging'); n.style.removeProperty('opacity'); if (!n.getAttribute('style')) n.removeAttribute('style') })
+    root.querySelectorAll('canvas[' + SHADER + ']').forEach((n) => { n.removeAttribute('width'); n.removeAttribute('height') })
     return '<!doctype html>\n' + root.outerHTML
   }
   const report = () => {
@@ -245,7 +293,7 @@ const SCRIPT = String.raw`(() => {
   }
   const elementAt = ({ x, y }) => editableElement(document.elementFromPoint(x, y))
   const parentOf = (el) => editableElement(el?.parentElement) || el
-  const snapshotComponent = (el) => {
+  const snapshotComponent = (el, id) => {
     const { width, height } = el.getBoundingClientRect()
     const embedded = 'script,style,iframe,object,embed,link'
     if (!width || !height || el.matches(embedded)) return null
@@ -267,16 +315,18 @@ const SCRIPT = String.raw`(() => {
         if (value) copy.style?.setProperty(property, value)
       }
       for (const attr of [...copy.attributes]) {
-        if (attr.name.startsWith('on') || ['contenteditable', 'autofocus', 'data-zeko-goto'].includes(attr.name)) copy.removeAttribute(attr.name)
+        if (attr.name.startsWith('on') || ['contenteditable', 'autofocus', 'data-zeko-goto', 'data-zeko-instance'].includes(attr.name)) copy.removeAttribute(attr.name)
       }
     }
     clone.querySelectorAll(embedded).forEach((node) => node.remove())
     clone.style.setProperty('position', 'relative')
     clone.style.removeProperty('inset')
     clone.style.removeProperty('margin')
+    clone.setAttribute('data-zeko-instance', id)
     return {
       name: nameOf(el).slice(0, 120),
       tag: el.tagName.toLowerCase(),
+      body: clone.outerHTML,
       html: '<!doctype html><meta charset="utf-8"><style>body{margin:0;display:grid;place-items:center;min-height:100vh}</style><body>' + clone.outerHTML + '</body>',
       w: Math.max(160, Math.ceil(width)),
       h: Math.max(120, Math.ceil(height)),
@@ -286,13 +336,159 @@ const SCRIPT = String.raw`(() => {
     selected = editableElement(el)
     if (editing) report()
   }
+  let textOriginal = ''
   const finishText = () => {
     if (!textEditing) return
     const el = textEditing
     textEditing = null
     el.removeAttribute('contenteditable')
-    commit()
+    // Formatting commands leave empty wrappers behind; drop them.
+    el.querySelectorAll('span, b, i, u, s, em, strong, mark, code, small').forEach((n) => { if (!n.textContent && !n.querySelector('br')) n.remove() })
+    el.normalize()
+    if (el.innerHTML !== textOriginal) commit(); else report()
   }
+  const TEXT_TAGS = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'SPAN', 'A', 'BUTTON', 'LI', 'LABEL', 'TD', 'TH', 'DT', 'DD', 'BLOCKQUOTE', 'FIGCAPTION', 'SMALL', 'STRONG', 'EM', 'CODE', 'PRE']
+  /** The element whose text a double-click edits: the block holding the clicked words, not an inline run inside it. */
+  const textTarget = (el) => {
+    if (!el || el === document.body || overlay.contains(el)) return null
+    while (INLINE_TAGS.includes(el.tagName) && el.parentElement && el.parentElement !== document.body && onlyText(el.parentElement)) el = el.parentElement
+    if (onlyText(el) || (!el.children.length && TEXT_TAGS.includes(el.tagName))) return el
+    return null
+  }
+  const startText = (el, caretAt) => {
+    pick(el)
+    textEditing = el
+    textOriginal = el.innerHTML
+    el.setAttribute('contenteditable', 'true')
+    el.focus()
+    const s = getSelection()
+    s.removeAllRanges()
+    const caret = caretAt && document.caretRangeFromPoint ? document.caretRangeFromPoint(caretAt.x, caretAt.y) : null
+    if (caret && el.contains(caret.startContainer)) {
+      // A double-click lands on a word: select it, like any text field.
+      s.addRange(caret)
+      s.modify && s.modify('move', 'backward', 'word')
+      s.modify && s.modify('extend', 'forward', 'word')
+    } else {
+      const range = document.createRange(); range.selectNodeContents(el); s.addRange(range)
+    }
+  }
+
+  /* Dragging layers inside the sketch: reorder within a stack, move into another container, or nudge an
+     absolutely positioned layer. Alt-drag drops a copy. */
+  const VOID_DROP = ['IMG', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'CANVAS', 'VIDEO', 'HR', 'BR', 'IFRAME', 'PICTURE']
+  const canContain = (el) => el === document.body || (el.localName !== 'svg' && !VOID_DROP.includes(el.tagName) && !(onlyText(el) && el.textContent.trim()))
+  const flowAxis = (el) => {
+    const cs = getComputedStyle(el)
+    if (cs.display.includes('flex')) return cs.flexDirection.startsWith('row') ? 'x' : 'y'
+    if (cs.display.includes('grid')) return cs.gridAutoFlow.startsWith('column') ? 'y' : 'x'
+    return 'y'
+  }
+  const lineBox = box(0, 'transparent', '#ff3d61')
+  const intoBox = box(1.5, '#ff3d61', 'rgba(255,61,97,.06)')
+  let drag = null, suppressClick = false
+  const hideDrop = () => { lineBox.style.display = 'none'; intoBox.style.display = 'none' }
+  const showLine = (rect, axis, at) => {
+    const t = 2 / pointerZoom
+    Object.assign(lineBox.style, axis === 'x'
+      ? { display: 'block', left: at - t / 2 + 'px', top: rect.top + 'px', width: t + 'px', height: rect.height + 'px' }
+      : { display: 'block', left: rect.left + 'px', top: at - t / 2 + 'px', width: rect.width + 'px', height: t + 'px' })
+  }
+  const insideAt = (container, x, y, dragged) => {
+    const axis = flowAxis(container)
+    const list = kids(container).filter((k) => k !== dragged && getComputedStyle(k).position !== 'absolute' && getComputedStyle(k).position !== 'fixed')
+    const before = list.find((k) => {
+      const r = k.getBoundingClientRect()
+      return axis === 'x' ? x < r.left + r.width / 2 && y < r.bottom : y < r.top + r.height / 2
+    }) || null
+    return { parent: container, before, axis }
+  }
+  const dropTarget = (x, y, dragged) => {
+    let t = editableElement(document.elementFromPoint(x, y)) || document.body
+    if (dragged.contains(t)) return null
+    while (t !== document.body && t.parentElement && !canContain(t.parentElement)) t = t.parentElement
+    if (t === document.body) return insideAt(document.body, x, y, dragged)
+    const parent = t.parentElement
+    const axis = flowAxis(parent)
+    const r = t.getBoundingClientRect()
+    const along = axis === 'x' ? (x - r.left) / r.width : (y - r.top) / r.height
+    if (canContain(t) && along > 0.25 && along < 0.75) return insideAt(t, x, y, dragged)
+    const before = along < 0.5 ? t : t.nextElementSibling && kids(parent).includes(t.nextElementSibling) ? t.nextElementSibling : null
+    return { parent, before: before === dragged ? dragged.nextElementSibling : before, axis }
+  }
+  const drawDrop = (drop) => {
+    hideDrop()
+    if (!drop) return
+    const pr = drop.parent.getBoundingClientRect()
+    if (drop.parent !== document.body) Object.assign(intoBox.style, { display: 'block', left: pr.left + 'px', top: pr.top + 'px', width: pr.width + 'px', height: pr.height + 'px' })
+    const anchor = drop.before || kids(drop.parent).filter((k) => k !== drag.el).at(-1)
+    if (!anchor) return showLine(pr, drop.axis === 'x' ? 'x' : 'y', drop.axis === 'x' ? pr.left + 2 : pr.top + 2)
+    const r = anchor.getBoundingClientRect()
+    if (drop.axis === 'x') showLine(r, 'x', drop.before ? r.left : r.right)
+    else showLine(drop.parent === document.body ? { left: 0, width: innerWidth, top: 0, height: 0 } : r, 'y', drop.before ? r.top : r.bottom)
+  }
+  const endDrag = (cancel) => {
+    const d = drag
+    drag = null
+    hideDrop()
+    if (!d || !d.started) return
+    document.documentElement.style.userSelect = ''
+    d.el.style.removeProperty('opacity')
+    d.el.removeAttribute('data-zeko-dragging')
+    if (!d.el.getAttribute('style')) d.el.removeAttribute('style')
+    if (cancel) {
+      if (d.copy) d.el.remove()
+      else if (d.absolute) { d.el.style.left = d.absolute.left; d.el.style.top = d.absolute.top }
+      selected = d.source
+      return report()
+    }
+    if (!d.absolute && d.drop) d.drop.parent.insertBefore(d.el, d.drop.before)
+    selected = d.el
+    commit()
+    post({ type: 'dropped', path: pathOf(d.el) })
+  }
+  addEventListener('pointerdown', (e) => {
+    if (!editing || textEditing || e.button !== 0 || !selected || selected === document.body) return
+    if (!selected.contains(e.target)) return
+    drag = { el: selected, source: selected, x: e.clientX, y: e.clientY, started: false, copy: false, absolute: null, drop: null }
+  }, true)
+  addEventListener('pointermove', (e) => {
+    if (!drag) return
+    if (!(e.buttons & 1)) return endDrag(false)
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y
+    if (!drag.started) {
+      if (Math.hypot(dx, dy) < 4 / pointerZoom) return
+      drag.started = true
+      suppressClick = true
+      document.documentElement.style.userSelect = 'none'
+      if (e.altKey) {
+        const copy = drag.el.cloneNode(true)
+        copy.removeAttribute('id')
+        drag.el.after(copy)
+        drag.el = copy
+        drag.copy = true
+      }
+      const cs = getComputedStyle(drag.el)
+      if (cs.position === 'absolute' || cs.position === 'fixed') {
+        drag.absolute = { left: drag.el.style.left, top: drag.el.style.top, x: parseFloat(cs.left) || drag.el.offsetLeft, y: parseFloat(cs.top) || drag.el.offsetTop }
+      } else {
+        drag.el.style.opacity = '0.4'
+        drag.el.setAttribute('data-zeko-dragging', '')
+      }
+    }
+    e.preventDefault()
+    if (drag.absolute) {
+      drag.el.style.left = Math.round(drag.absolute.x + dx) + 'px'
+      drag.el.style.top = Math.round(drag.absolute.y + dy) + 'px'
+      selected = drag.el
+      scheduleDraw()
+    } else {
+      drag.drop = dropTarget(e.clientX, e.clientY, drag.el)
+      drawDrop(drag.drop)
+    }
+  }, true)
+  addEventListener('pointerup', () => { if (drag) endDrag(false) }, true)
+  addEventListener('pointercancel', () => endDrag(true), true)
 
   addEventListener('mousemove', (e) => {
     if (!editing) return
@@ -302,6 +498,7 @@ const SCRIPT = String.raw`(() => {
   addEventListener('mouseleave', () => { hovered = null; scheduleDraw() })
   addEventListener('click', (e) => {
     if (!editing) return
+    if (suppressClick) { suppressClick = false; e.preventDefault(); e.stopPropagation(); return }
     if (textEditing && textEditing.contains(e.target)) return
     e.preventDefault(); e.stopPropagation()
     finishText()
@@ -311,31 +508,37 @@ const SCRIPT = String.raw`(() => {
   }, true)
   addEventListener('dblclick', (e) => {
     if (!editing) return
+    if (textEditing && textEditing.contains(e.target)) return
     e.preventDefault(); e.stopPropagation()
-    const el = e.target
-    if (!onlyText(el) || !el.textContent.trim()) return
-    pick(el)
-    textEditing = el
-    el.setAttribute('contenteditable', 'plaintext-only')
-    el.focus()
-    const range = document.createRange(); range.selectNodeContents(el)
-    const s = getSelection(); s.removeAllRanges(); s.addRange(range)
+    const el = textTarget(e.target)
+    if (el) startText(el, { x: e.clientX, y: e.clientY })
   }, true)
+  addEventListener('paste', (e) => {
+    if (!textEditing) return
+    // Pasted text takes on the surrounding style instead of bringing markup from elsewhere.
+    e.preventDefault()
+    document.execCommand('insertText', false, e.clipboardData.getData('text/plain'))
+  }, true)
+  addEventListener('input', () => { if (textEditing) { scheduleDraw(); post({ type: 'selected', info: info(selected) }) } }, true)
   addEventListener('focusout', (e) => { if (textEditing && e.target === textEditing) finishText() })
   addEventListener('submit', (e) => { if (editing) e.preventDefault() }, true)
   addEventListener('keydown', (e) => {
     if (!editing) return
     const mod = e.metaKey || e.ctrlKey
     if (textEditing) {
-      if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); textEditing.blur() }
+      if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); textEditing.blur(); return }
+      const formats = { b: 'bold', i: 'italic', u: 'underline' }
+      const format = mod && (e.shiftKey && e.key.toLowerCase() === 'x' ? 'strikeThrough' : !e.shiftKey && formats[e.key.toLowerCase()])
+      if (format) { e.preventDefault(); document.execCommand(format) }
       return
     }
+    if (e.key === 'Escape' && drag) { e.preventDefault(); endDrag(true); return }
     if (e.key === 'Escape') { e.preventDefault(); if (selected) pick(null); else post({ type: 'escape' }); return }
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); post({ type: 'history', redo: e.shiftKey }); return }
     if (!selected) return
     if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); const p = selected.parentElement; selected.remove(); selected = p === document.body ? null : p; commit() }
     else if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); const c = selected.cloneNode(true); selected.after(c); selected = c; commit() }
-    else if (e.key === 'Enter' && onlyText(selected)) { e.preventDefault(); selected.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) }
+    else if (e.key === 'Enter' && textTarget(selected) === selected) { e.preventDefault(); startText(selected, null) }
   }, true)
   addEventListener('scroll', scheduleDraw, true)
   addEventListener('resize', scheduleDraw)
@@ -387,8 +590,44 @@ const SCRIPT = String.raw`(() => {
       scheduleDraw()
     } else if (m.type === 'save-component') {
       const el = editing && editableElement(byPath(m.path))
-      const component = el ? snapshotComponent(el) : null
+      const component = el ? snapshotComponent(el, m.requestId) : null
       post({ type: 'component', requestId: m.requestId, component })
+      // The element it came from becomes the first instance.
+      if (component) { el.setAttribute('data-zeko-instance', m.requestId); commit() }
+    } else if (m.type === 'insert-html') {
+      const target = m.path === null ? document.body : byPath(m.path)
+      if (!target) return
+      const inside = m.position === 'inside' && canContain(target)
+      const range = document.createRange()
+      range.selectNodeContents(inside ? target : target.parentElement || document.body)
+      const fragment = range.createContextualFragment(m.html)
+      fragment.querySelectorAll('script').forEach((n) => n.remove())
+      const first = [...fragment.children][0]
+      if (!first) return
+      if (inside) target.appendChild(fragment); else target.after(fragment)
+      if (document.querySelector('canvas[' + SHADER + ']') && !document.getElementById(SHADER_RUNTIME)) {
+        const runtime = document.createRange()
+        runtime.selectNodeContents(document.body)
+        document.body.appendChild(runtime.createContextualFragment(RUNTIME_TAG))
+      }
+      selected = first
+      commit()
+    } else if (m.type === 'reparent') {
+      const el = byPath(m.path), target = byPath(m.target)
+      if (!el || !target || el === target || el.contains(target)) return
+      if (m.position === 'inside') { if (!canContain(target)) return; target.appendChild(el) }
+      else if (target === document.body) return
+      else if (m.position === 'before') target.before(el)
+      else target.after(el)
+      selected = el
+      commit()
+    } else if (m.type === 'ensure-font') {
+      if ([...document.querySelectorAll('link[rel="stylesheet"]')].some((l) => l.getAttribute('href') === m.href)) return
+      const link = document.createElement('link')
+      link.rel = 'stylesheet'
+      link.href = m.href
+      document.head.appendChild(link)
+      commit()
     } else if (m.type === 'select') { pick(m.path === null ? null : byPath(m.path)) }
     else if (m.type === 'hover') { hovered = m.path === null ? null : byPath(m.path); scheduleDraw() }
     else if (m.type === 'hover-point') {

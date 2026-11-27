@@ -18,7 +18,7 @@ interface LayerInfo {
 }
 
 export type LayerEdit =
-  | { op: 'update'; path: string; text?: string; styles?: Record<string, string | null> }
+  | { op: 'update'; path: string; text?: string; styles?: Record<string, string | null>; attrs?: Record<string, string | null> }
   | ({ op: 'insert'; html: string } & Placement)
   | ({ op: 'move'; path: string } & Placement)
   | { op: 'replace'; path: string; html: string }
@@ -167,6 +167,14 @@ export function editLayers(html: string, edits: LayerEdit[]) {
                 textNodes.slice(1).forEach((child) => child.parentNode?.removeChild(child))
               }
             }
+            if (edit.attrs) {
+              for (const [name, value] of Object.entries(edit.attrs)) {
+                if (/^on/i.test(name) || !/^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/.test(name)) throw new Error(`Attribute ${name} can’t be set here.`)
+                if (value !== null && /^\s*javascript:/i.test(value)) throw new Error(`Attribute ${name} can’t hold a javascript: address.`)
+                if (value === null) node.removeAttribute(name)
+                else node.setAttribute(name, value)
+              }
+            }
             if (edit.styles) {
               const style = (node as HTMLElement | SVGElement).style
               if (!style) throw new Error('This layer does not support inline CSS.')
@@ -203,5 +211,61 @@ export function editLayers(html: string, edits: LayerEdit[]) {
       }
       return { html: next, paths }
     }, html, edits, LAYER_IGNORED_TAGS, LAYER_IGNORED_IDS)
+  })
+}
+
+/** One layer's attributes and tag, read from the authored HTML. */
+export function layerAttributes(html: string, path: string) {
+  return withSketchPage(async (page) => {
+    await page.setOfflineMode(true)
+    return page.evaluate((source, path, ignoredTags, ignoredIds) => {
+      const doc = new DOMParser().parseFromString(source, 'text/html')
+      const children = (node: Element) => Array.from(node.children).filter((child) => !ignoredTags.includes(child.localName) && !ignoredIds.includes(child.id))
+      const found = path.split('.').reduce<Element | undefined>((node, index) => node && children(node)[Number(index)], doc.body)
+      if (!found) throw new Error(`Layer ${path} was not found.`)
+      return { tag: found.localName, attrs: Object.fromEntries(Array.from(found.attributes).map((a) => [a.name, a.value])), outerHTML: found.outerHTML }
+    }, html, path, LAYER_IGNORED_TAGS, LAYER_IGNORED_IDS)
+  })
+}
+
+/**
+ * A layer as a self-contained component: its computed look written inline, so it keeps that look in any sketch.
+ * The same properties the editor captures when a person saves a component.
+ */
+export function componentFromLayer(html: string, frame: { w: number; h: number }, path: string, id: string) {
+  return withSketchPage(async (page) => {
+    await page.setViewport({ width: Math.round(frame.w), height: Math.round(frame.h) })
+    await page.setJavaScriptEnabled(false)
+    await page.setContent(html, { waitUntil: 'load', timeout: 8000 }).catch(() => undefined)
+    return page.evaluate((path, id, ignoredTags, ignoredIds) => {
+      const children = (node: Element) => Array.from(node.children).filter((child) => !ignoredTags.includes(child.localName) && !ignoredIds.includes(child.id))
+      const el = path.split('.').reduce<Element | undefined>((node, index) => node && children(node)[Number(index)], document.body)
+      if (!el) throw new Error(`Layer ${path} was not found.`)
+      const { width, height } = el.getBoundingClientRect()
+      const clone = el.cloneNode(true) as HTMLElement
+      const original = [el, ...Array.from(el.querySelectorAll('*'))]
+      const copies = [clone, ...Array.from(clone.querySelectorAll('*'))] as HTMLElement[]
+      original.forEach((node, i) => {
+        const style = getComputedStyle(node)
+        for (const property of [
+          'box-sizing', 'display', 'width', 'height', 'margin', 'padding', 'overflow', 'vertical-align', 'position', 'inset', 'transform',
+          'gap', 'flex', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'grid-template-columns', 'grid-template-rows',
+          'grid-area', 'object-fit', 'font', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align',
+          'text-decoration', 'white-space', 'color', 'background', 'border', 'border-radius', 'box-shadow', 'opacity', 'fill', 'stroke', 'stroke-width',
+        ]) {
+          const value = style.getPropertyValue(property)
+          if (value) copies[i]!.style?.setProperty(property, value)
+        }
+        for (const attr of Array.from(copies[i]!.attributes)) {
+          if (attr.name.startsWith('on') || ['contenteditable', 'autofocus', 'data-zeko-goto', 'data-zeko-instance'].includes(attr.name)) copies[i]!.removeAttribute(attr.name)
+        }
+      })
+      clone.querySelectorAll('script,style,iframe,object,embed,link').forEach((node) => node.remove())
+      clone.style.setProperty('position', 'relative')
+      clone.style.removeProperty('inset')
+      clone.style.removeProperty('margin')
+      clone.setAttribute('data-zeko-instance', id)
+      return { tag: el.localName, body: clone.outerHTML, w: Math.max(160, Math.ceil(width)), h: Math.max(120, Math.ceil(height)) }
+    }, path, id, LAYER_IGNORED_TAGS, LAYER_IGNORED_IDS)
   })
 }

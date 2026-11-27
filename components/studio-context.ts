@@ -85,6 +85,10 @@ export interface StudioState {
   openWebsite: (frameId?: string) => void
   openCode: (frameId: string) => void
   saveComponent: (path: string) => void
+  /** Opens a component's main copy on the canvas, creating it if needed. */
+  editComponent: (component: SketchComponent) => void
+  /** Puts HTML into the sketch being edited: inside the selected container, after the selected element, or at the end. */
+  insertHtml: (html: string) => boolean
 
   /** Feedback and choices that float above everything. */
   toast: (text: string) => void

@@ -3,6 +3,8 @@ import { DEFAULT_THEME, defaultDesign, tokenLabels, validTokenName, validTokenVa
 import { acpAgent, readAcpSelection } from './acp'
 import { shapeDocument } from './client/draw'
 import { readCanvasSkill } from './canvas-skills'
+import { componentBody, componentDocument, replaceInstances, withRootAttribute, INSTANCE_ATTR } from './components'
+import { withShaderRuntime } from './shaders'
 
 const MAX_ACTIVITY = 60
 const LANE_GAP = 240
@@ -54,6 +56,7 @@ function isSketchComponent(input: unknown): input is SketchComponent {
     typeof name === 'string' && !!name.trim() && name.length <= 120 &&
     typeof tag === 'string' && /^[a-z][a-z0-9-]*$/.test(tag) &&
     typeof html === 'string' && !!html &&
+    ((input as Partial<SketchComponent>).body === undefined || typeof (input as Partial<SketchComponent>).body === 'string') &&
     typeof w === 'number' && Number.isFinite(w) && w > 0 &&
     typeof h === 'number' && Number.isFinite(h) && h > 0
 }
@@ -370,12 +373,25 @@ export function applyOp(input: Board, op: Op, actor: Actor): Board {
       }
       break
     }
+    case 'component.update': {
+      const component = board.components?.find((c) => c.id === op.id)
+      if (!component) break
+      if (typeof op.name === 'string' && op.name.trim()) {
+        component.name = op.name.trim().slice(0, 120)
+        for (const frame of board.frames) if (frame.componentId === op.id) frame.name = component.name
+      }
+      if (typeof op.body === 'string' && op.body.trim()) {
+        syncComponent(board, op.id, withRootAttribute(op.body.trim(), INSTANCE_ATTR, op.id), actor, now, new Set())
+      }
+      break
+    }
     case 'component.remove': {
       if (board.components) board.components = board.components.filter((component) => component.id !== op.id)
       break
     }
     case 'frame.create': {
-      board.frames.push({ ...op.frame, createdBy: actor, createdAt: now, updatedAt: now })
+      const html = op.frame.html !== undefined && op.frame.kind === 'sketch' ? withShaderRuntime(op.frame.html) : op.frame.html
+      board.frames.push({ ...op.frame, html, createdBy: actor, createdAt: now, updatedAt: now })
       log(board, actor, `added ${op.frame.name}`)
       break
     }
@@ -393,9 +409,12 @@ export function applyOp(input: Board, op: Op, actor: Actor): Board {
         }
       }
       const { w: _w, h: _h, ...content } = rest
-      if (content.html !== undefined && frame.html !== undefined && content.html !== frame.html) keepVersion(frame, actor, now)
+      if (content.html !== undefined && frame.kind === 'sketch') content.html = withShaderRuntime(content.html)
+      const htmlChanged = content.html !== undefined && content.html !== frame.html
+      if (htmlChanged && frame.html !== undefined) keepVersion(frame, actor, now)
       Object.assign(frame, content)
       frame.updatedAt = now
+      if (htmlChanged && frame.componentId) syncFromMain(board, frame, actor, now)
       if (content.html !== undefined && actor.kind === 'agent') log(board, actor, `edited ${frame.name}`)
       if ('route' in content) removeOrphanSheetLabels(board)
       break
@@ -407,6 +426,7 @@ export function applyOp(input: Board, op: Op, actor: Actor): Board {
       keepVersion(frame, actor, now, true)
       frame.html = version.html
       frame.updatedAt = now
+      if (frame.componentId) syncFromMain(board, frame, actor, now)
       log(board, actor, `restored an earlier version of ${frame.name}`)
       break
     }
@@ -608,6 +628,33 @@ const QUIET_MS = 90_000
  * Saves a sketch's current HTML before it changes. Edits by the same person in quick succession
  * share one saved version, so dragging a slider doesn't fill the history.
  */
+/** The main copy of a component changed: carry its element to every instance. */
+function syncFromMain(board: Board, main: Frame, actor: Actor, now: number) {
+  const body = main.html && componentBody(main.html, main.componentId!)
+  if (body) syncComponent(board, main.componentId!, body, actor, now, new Set([main.id]))
+}
+
+/** Rewrite each instance of a component, and follow on to components whose main copy contains one. */
+function syncComponent(board: Board, id: string, body: string, actor: Actor, now: number, skip: Set<string>, depth = 0) {
+  const component = board.components?.find((c) => c.id === id)
+  if (!component || depth > 4) return
+  component.body = body
+  for (const frame of board.frames) {
+    if (frame.kind !== 'sketch' || !frame.html || skip.has(frame.id)) continue
+    const next = frame.componentId === id ? componentDocument(body) : replaceInstances(frame.html, id, body)
+    if (next === frame.html) continue
+    keepVersion(frame, actor, now)
+    frame.html = next
+    frame.updatedAt = now
+    if (frame.componentId && frame.componentId !== id) {
+      const nested = componentBody(next, frame.componentId)
+      if (nested) syncComponent(board, frame.componentId, nested, actor, now, new Set([...skip, frame.id]), depth + 1)
+    }
+  }
+  const main = board.frames.find((frame) => frame.componentId === id)
+  component.html = main?.html ?? componentDocument(body)
+}
+
 function keepVersion(frame: Frame, actor: Actor, now: number, force = false) {
   if (frame.html === undefined) return
   const versions = (frame.versions ??= [])

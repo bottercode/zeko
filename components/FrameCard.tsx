@@ -3,7 +3,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { tokenCss, withTokenCss } from '@/lib/tokens'
 import { alignMovingBox, boxAround, type FrameBox } from '@/lib/client/frame-snap'
-import { Braces, Check, ChevronLeft, Download, FileCode, Globe, Link2, PenLine, PencilRuler, ChevronRight, Columns2, Copy, ExternalLink, Layers, MousePointerClick, Scan, Trash2 } from 'lucide-react'
+import { Braces, Camera, Check, ChevronLeft, Code2, Download, FileCode, Globe, Link2, PenLine, PencilRuler, ChevronRight, Columns2, Copy, ExternalLink, Layers, MousePointerClick, Scan, Trash2 } from 'lucide-react'
 import { deckMembers, frameSourceUrl, visibleFrames } from '@/lib/ops'
 import { agentColor } from '@/lib/client/useBoard'
 import type { Frame } from '@/lib/types'
@@ -198,7 +198,10 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
       { label: 'Edit HTML', icon: <Braces size={14} />, onSelect: () => s.openCode(frame.id) },
     )
     if (canInteract && frame.kind !== 'sketch') items.push({ label: 'Use the page', icon: <MousePointerClick size={14} />, keys: ['↵'], onSelect: () => act.use(frame) })
-    if (frame.kind === 'website') items.push({ label: 'Edit website URL', icon: <Link2 size={14} />, onSelect: () => s.openWebsite(frame.id) })
+    if (frame.kind === 'website') items.push(
+      { label: 'Edit website URL', icon: <Link2 size={14} />, onSelect: () => s.openWebsite(frame.id) },
+      { label: 'Snapshot as editable sketch', icon: <Camera size={14} />, onSelect: () => void act.snapshot(frame) },
+    )
     items.push(
       { label: 'Make a variant', icon: <Layers size={14} />, keys: ['⌘', 'D'], onSelect: () => act.variant(frame) },
       { label: 'Duplicate', icon: <Copy size={14} />, onSelect: () => act.duplicate(frame) },
@@ -215,6 +218,8 @@ export function FrameCard({ frame, panLocked, workers }: { frame: Frame; panLock
       items.push(
         { label: 'Export PNG 2×', icon: <Download size={14} />, onSelect: () => void act.exportPng(frame, 2) },
         { label: 'Export HTML', icon: <FileCode size={14} />, onSelect: () => act.exportHtml(frame) },
+        { label: 'Copy as HTML', icon: <Copy size={14} />, onSelect: () => void act.copyCode(frame, 'html') },
+        { label: 'Copy as React', icon: <Code2 size={14} />, onSelect: () => void act.copyCode(frame, 'react') },
       )
     if (canInteract && act.canOpenInTab(frame)) items.push({ label: 'Open in new tab', icon: <ExternalLink size={14} />, onSelect: () => act.openInTab(frame) })
     items.push('divider', { label: 'Delete', icon: <Trash2 size={14} />, keys: ['⌫'], danger: true, onSelect: () => act.remove([frame.id]) })

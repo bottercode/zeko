@@ -4,6 +4,7 @@ import { deckMembers, frameSourceUrl } from '@/lib/ops'
 import { newId } from '@/lib/client/useBoard'
 import type { Frame } from '@/lib/types'
 import { withDesignTokens } from '@/lib/tokens'
+import { copyToClipboard, frameCode, type CodeFormat } from '@/lib/client/copy-code'
 import { useStudio } from './studio-context'
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -90,6 +91,40 @@ export function useFrameActions() {
       if (frame.html === undefined) return
       download(new Blob([withDesignTokens(frame.html, board.design)], { type: 'text/html' }), `${fileName(frame.name)}.html`)
       toast(`Exported ${fileName(frame.name)}.html`)
+    },
+    async copyCode(frame: Frame, format: CodeFormat) {
+      if (frame.html === undefined) return
+      const code = frameCode(frame.html, frame.name, board.design, format)
+      if (!code) return toast(format === 'tokens' ? 'This canvas has no tokens yet.' : 'Nothing to copy.')
+      try {
+        await copyToClipboard(code)
+        toast(format === 'react' ? 'Copied as a React component' : format === 'tokens' ? 'Copied tokens as CSS variables' : 'Copied HTML')
+      } catch {
+        toast('Couldn’t reach the clipboard. Use Export HTML instead.')
+      }
+    },
+    /** Turns a website frame into an editable sketch beside it: the page as rendered, with its styles written inline. */
+    async snapshot(frame: Frame) {
+      const url = frameSourceUrl(frame, board.appUrl)
+      if (!url) return
+      toast(`Capturing ${frame.name}…`)
+      try {
+        const res = await fetch(`/api/snapshot?board=${encodeURIComponent(boardId)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url, width: frame.w, height: frame.h }),
+        })
+        const data = (await res.json().catch(() => ({}))) as { html?: string; title?: string; height?: number; error?: string }
+        if (!res.ok || !data.html) throw new Error(data.error ?? 'Couldn’t capture that page.')
+        const id = newId()
+        dispatch({ type: 'frame.create', frame: {
+          id, pageId: frame.pageId, kind: 'sketch', name: `${data.title || frame.name} (snapshot)`, html: data.html,
+          x: frame.x + frame.w + 96, y: frame.y, w: frame.w, h: Math.max(frame.h, Math.min(8000, data.height ?? frame.h)),
+        } })
+        select([id])
+        toast('Snapshot ready: every layer is editable')
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'Couldn’t capture that page.')
+      }
     },
     restoreVersion(frame: Frame, at: number) {
       dispatch({ type: 'frame.restoreVersion', id: frame.id, at })

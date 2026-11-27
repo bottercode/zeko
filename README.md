@@ -104,7 +104,10 @@ The app's start scripts listen on loopback. Other Streamable HTTP clients can us
 Tools:
 
 - Reading: `get_board`, `get_frame`, `get_guidelines`
-- Layer editing: `get_layers` reads the layer tree and computed styles. `edit_layers` saves a batch of text, CSS, and layout edits as one version.
+- Layer editing: `get_layers` reads the layer tree and computed styles. `edit_layers` saves a batch of text, CSS, attribute and layout edits as one version.
+- Images and drawing: `place_image` and `place_svg` add images and drawings the agent made with its own tools, `get_image` shows it a sketch's picture to rework, and `add_shader` adds animated mesh gradient, liquid, grain, paper and halftone layers
+- Components: `create_component`, `get_component`, `insert_component`, `update_component` (every instance follows)
+- From and to code: `snapshot_url` captures a live webpage as an editable sketch; `get_frame_code` returns a sketch as HTML or a React component with the tokens, fonts, images and components it relies on
 - Designing: `create_sketch` (with `variant_of` to join a deck), `edit_sketch`, `append_to_sketch` for long pages,
   `fit_frame_to_content`, `delete_frame` (only frames the agent made)
 - Checking its own work: `screenshot_frame` returns the rendered sketch as an image, `inspect_frame` returns
@@ -112,7 +115,16 @@ Tools:
 - History: `list_versions`, `restore_version`
 - Working with people: `set_status`, `claim_task`, `complete_task`, `reply_to_comment`, `update_guidelines`
 
-Screenshots, inspection and PNG export render in a headless Chrome. Zeko uses the Chrome already installed;
+Zeko calls no AI models of its own. Images and drawings come from your agents: they create them with their own
+tools and place them with `place_image` and `place_svg`. Placed images are stored in the sketch as compressed
+WebP, so a sketch stays a single self-contained file, and placed SVG is stripped of scripts and external references.
+
+In browsers with WebMCP (`navigator.modelContext`), an open canvas also offers its tools to in-browser agents:
+reading the canvas and selection, creating and editing sketches, styling the selected element, comments,
+design requests, tokens and frame code.
+
+Screenshots, inspection, PNG export and webpage snapshots render in a headless Chrome. With `ZEKO_HOSTED=1`,
+snapshots and placed image addresses refuse private networks. Zeko uses the Chrome already installed;
 set `ZEKO_CHROME` to use another Chromium-based browser.
 
 ## How it's built
