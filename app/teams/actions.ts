@@ -1,7 +1,7 @@
 'use server'
 
 import { headers } from 'next/headers'
-import { updateSession } from '@/auth'
+import { signOut, updateSession } from '@/auth'
 import { googleAuthConfigured, USER_HEADER, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
 import {
   acceptInvite, activeTeamFor, createTeam, deleteTeam, leaveTeam, listTeams, removeMember, renameTeam, resetInvite,
@@ -141,11 +141,27 @@ export async function acceptInviteAction(token: string) {
   })
 }
 
-/** When the open team is gone (removed or deleted by someone else), open the person's last or personal team. */
-export async function recoverTeam() {
-  return attempt(async () => {
+/** End a session that can't open any team, so the person signs in afresh. */
+export async function endStaleSession(): Promise<'/login'> {
+  await signOut({ redirect: false })
+  return '/login'
+}
+
+/**
+ * When the open team is gone (removed or deleted by someone else), open the person's last or personal team, and
+ * say where to go next. A session whose account no longer exists has no team to open: end it, so they sign in again.
+ */
+export async function recoverTeam(): Promise<'/' | '/login'> {
+  try {
     const { user } = await person()
     await open(user, await activeTeamFor(user))
-    return null
-  })
+    return '/'
+  } catch (error) {
+    if (!(error instanceof TeamError)) {
+      console.error('Zeko could not reopen a team.', error)
+      return '/'
+    }
+    await signOut({ redirect: false })
+    return '/login'
+  }
 }

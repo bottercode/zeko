@@ -1,5 +1,7 @@
 import { canvasReturnPath } from '../auth-access'
-import { recoverTeam } from '@/app/teams/actions'
+import { endStaleSession, recoverTeam } from '@/app/teams/actions'
+
+const RECOVERED = 'zeko.team-recovered-at'
 
 /**
  * Handle a response that means the session can't be used here: send the person to sign in, or, when they are
@@ -10,10 +12,13 @@ export async function returnToSignIn(response: Response) {
   const result = await response.clone().json().catch(() => null) as { code?: string } | null
   if (response.status === 403) {
     if (result?.code !== 'team_access') return false
-    await recoverTeam().catch(() => undefined)
-    // A full load: the session now names another team, and every list must start fresh.
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.assign('/')
+    // Recovering twice within a short while means it didn't take; end the session rather than reload forever.
+    const last = Number(sessionStorage.getItem(RECOVERED) ?? 0)
+    const repeat = Date.now() - last < 15_000
+    sessionStorage.setItem(RECOVERED, String(Date.now()))
+    const next = repeat ? await endStaleSession() : await recoverTeam().catch(() => '/' as const)
+    // A full load: the session now names another team (or none), and every list must start fresh.
+    window.location.assign(next)
     return true
   }
   if (result?.code !== 'sign_in_required') return false
