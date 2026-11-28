@@ -1,16 +1,19 @@
-import { ACP_DEVICE_HEADER, googleAuthConfigured, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
+import { ACP_DEVICE_HEADER, googleAuthConfigured, workspaceId } from '@/lib/auth-access'
+import { requestMember } from '@/lib/server/teams'
 import { ACP_AGENTS } from '@/lib/acp'
 import { eventStream } from '@/lib/server/events'
 import { receiveAcpOutput, registerAcpDevice, type RelayCommand } from '@/lib/server/acp-relay'
 
-function deviceOf(request: Request) {
-  const workspace = request.headers.get(WORKSPACE_HEADER)
+/** A paired CLI, while the person who paired it is still in the team. */
+async function deviceOf(request: Request) {
   const device = request.headers.get(ACP_DEVICE_HEADER)
-  return googleAuthConfigured() && workspaceId(workspace) && workspaceId(device) ? { workspace, device } : undefined
+  if (!googleAuthConfigured() || !workspaceId(device)) return
+  const member = await requestMember(request.headers)
+  return member ? { workspace: member.team, device } : undefined
 }
 
 export async function GET(request: Request) {
-  const caller = deviceOf(request)
+  const caller = await deviceOf(request)
   if (!caller) return new Response(null, { status: 401 })
   const advertised = new Set((new URL(request.url).searchParams.get('agents') ?? '').split(','))
   const agents = ACP_AGENTS.filter(({ id }) => advertised.has(id)).map(({ id }) => id)
@@ -19,7 +22,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const caller = deviceOf(request)
+  const caller = await deviceOf(request)
   if (!caller) return new Response(null, { status: 401 })
   const input = await request.json().catch(() => null)
   if (typeof input?.id !== 'string' || !/^[a-f0-9-]{36}$/.test(input.id)) return new Response(null, { status: 400 })

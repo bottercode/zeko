@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { decode, getToken } from 'next-auth/jwt'
 import { NextResponse, type NextRequest } from 'next/server'
-import { ACP_DEVICE_HEADER, ACP_RUN_TOKEN_SALT, ACP_TOKEN_SALT, canvasReturnPath, googleAuthConfigured, MCP_AGENT_HEADER, MCP_OAUTH_PATH, MCP_OAUTH_TOKEN_SALT, MCP_PATH, MCP_RESOURCE_METADATA, MCP_SERVER_METADATA, MCP_TOKEN_SALT, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
+import { ACP_DEVICE_HEADER, ACP_RUN_TOKEN_SALT, ACP_TOKEN_SALT, canvasReturnPath, googleAuthConfigured, MCP_AGENT_HEADER, MCP_OAUTH_PATH, MCP_OAUTH_TOKEN_SALT, MCP_PATH, MCP_RESOURCE_METADATA, MCP_SERVER_METADATA, MCP_TOKEN_SALT, USER_HEADER, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
 
 function basicAuthorized(header: string | null) {
   const password = process.env.ZEKO_PREVIEW_PASSWORD
@@ -32,6 +32,7 @@ export async function proxy(request: NextRequest) {
   headers.delete('x-zeko-preview-gateway')
   headers.delete('authorization')
   headers.delete(WORKSPACE_HEADER)
+  headers.delete(USER_HEADER)
   headers.delete(ACP_DEVICE_HEADER)
   headers.delete(MCP_AGENT_HEADER)
   const { pathname, search } = request.nextUrl
@@ -60,6 +61,7 @@ export async function proxy(request: NextRequest) {
     const token = await bearerToken(request, ACP_TOKEN_SALT)
     if (!workspaceId(token?.workspace) || !workspaceId(token?.device)) return new NextResponse(null, { status: 401 })
     headers.set(WORKSPACE_HEADER, token.workspace)
+    headers.set(USER_HEADER, tokenUser(token))
     headers.set(ACP_DEVICE_HEADER, token.device)
     return NextResponse.next({ request: { headers } })
   }
@@ -74,6 +76,7 @@ export async function proxy(request: NextRequest) {
       const oauth = await bearerToken(request, MCP_OAUTH_TOKEN_SALT)
       if (oauth?.aud === publicOrigin.origin + MCP_PATH && workspaceId(oauth.workspace)) {
         headers.set(WORKSPACE_HEADER, oauth.workspace)
+        headers.set(USER_HEADER, tokenUser(oauth))
         if (typeof oauth.agent === 'string') headers.set(MCP_AGENT_HEADER, oauth.agent)
         return NextResponse.next({ request: { headers } })
       }
@@ -91,6 +94,7 @@ export async function proxy(request: NextRequest) {
       return new NextResponse(null, { status: 401 })
     }
     headers.set(WORKSPACE_HEADER, token.workspace)
+    headers.set(USER_HEADER, tokenUser(token))
     return NextResponse.next({ request: { headers } })
   }
   if (
@@ -102,7 +106,8 @@ export async function proxy(request: NextRequest) {
   }
 
   const token = await getToken({ req: { headers }, secret: process.env.AUTH_SECRET, secureCookie: true })
-  if (!workspaceId(token?.workspace) || token.sub !== token.workspace) {
+  // sub is the person and workspace the team they have open; sessions from before teams carry the same ID in both.
+  if (!workspaceId(token?.workspace) || !workspaceId(token.sub)) {
     if (pathname === '/api' || pathname.startsWith('/api/') || !read) {
       return NextResponse.json({ error: 'Sign in to Zeko.', code: 'sign_in_required' }, { status: 401 })
     }
@@ -113,7 +118,13 @@ export async function proxy(request: NextRequest) {
   }
 
   headers.set(WORKSPACE_HEADER, token.workspace)
+  headers.set(USER_HEADER, token.sub)
   return NextResponse.next({ request: { headers } })
+}
+
+/** The person an agent token acts for. Tokens issued before teams name only the workspace, which was the person's own. */
+function tokenUser(token: Record<string, unknown>) {
+  return workspaceId(token.user) ? token.user : token.workspace as string
 }
 
 async function bearerToken(request: Request, salt: string) {

@@ -1,5 +1,6 @@
 import { encode } from 'next-auth/jwt'
-import { ACP_TOKEN_SALT, googleAuthConfigured, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
+import { ACP_TOKEN_SALT, googleAuthConfigured, workspaceId } from '@/lib/auth-access'
+import { requestMember } from '@/lib/server/teams'
 import { approveCli, cliApproval } from '@/lib/server/acp-pairing'
 
 export async function POST(request: Request) {
@@ -14,10 +15,10 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   if (!googleAuthConfigured()) return new Response(null, { status: 404 })
-  const workspace = request.headers.get(WORKSPACE_HEADER)
-  if (!workspaceId(workspace)) return new Response(null, { status: 401 })
+  const member = await requestMember(request.headers)
+  if (!member) return new Response(null, { status: 401 })
   const input = await request.json().catch(() => null)
   if (!workspaceId(input?.code)) return Response.json({ error: 'Open the approval link from the Zeko CLI.' }, { status: 400 })
-  if (!approveCli(input.code, workspace)) return Response.json({ error: 'Start a new connection from the Zeko CLI.' }, { status: 409 })
+  if (!approveCli(input.code, member.team, member.user)) return Response.json({ error: 'Start a new connection from the Zeko CLI.' }, { status: 409 })
   return Response.json({ approved: true })
 }

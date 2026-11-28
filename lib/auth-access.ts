@@ -1,4 +1,6 @@
 export const WORKSPACE_HEADER = 'x-zeko-workspace'
+/** the signed-in person; WORKSPACE_HEADER is the team they are working in */
+export const USER_HEADER = 'x-zeko-user'
 export const MCP_TOKEN_SALT = 'zeko-mcp-v1'
 export const MCP_OAUTH_TOKEN_SALT = 'zeko-mcp-oauth-access-v1'
 export const MCP_AGENT_HEADER = 'x-zeko-mcp-agent'
@@ -29,7 +31,7 @@ export function canvasReturnPath(value: unknown) {
   if (typeof value !== 'string' || !value.startsWith('/') || /[\\\s]/.test(value) || value.length > 2048) return '/'
   try {
     const url = new URL(value, base)
-    return url.origin === base && /^\/(?:c\/[\w-]+|connect\/(?:cli|mcp))?$/.test(url.pathname) ? url.pathname + url.search : '/'
+    return url.origin === base && /^\/(?:c\/[\w-]+|connect\/(?:cli|mcp)|join\/[\w-]{32})?$/.test(url.pathname) ? url.pathname + url.search : '/'
   } catch {
     return '/'
   }

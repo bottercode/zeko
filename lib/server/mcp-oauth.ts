@@ -5,6 +5,7 @@ import { and, eq, gt, lt } from 'drizzle-orm'
 import { decode, encode } from 'next-auth/jwt'
 import { z } from 'zod'
 import { googleAuthConfigured, MCP_OAUTH_TOKEN_SALT, MCP_PATH } from '../auth-access'
+import { teamRole } from './teams'
 import { workspaceDatabase } from '../db/connection'
 import { mcpOAuthGrants } from '../db/schema'
 
@@ -151,7 +152,7 @@ export async function mcpConsent(token: unknown) {
   if (consent.success) return consent.data
 }
 
-export async function finishMcpConsent(consent: z.infer<typeof consentClaims>, workspace: string, approved: boolean) {
+export async function finishMcpConsent(consent: z.infer<typeof consentClaims>, member: { team: string; user: string }, approved: boolean) {
   const next = new URL(consent.redirectUri)
   if (consent.state) next.searchParams.set('state', consent.state)
   next.searchParams.set('iss', issuer())
@@ -165,7 +166,7 @@ export async function finishMcpConsent(consent: z.infer<typeof consentClaims>, w
   await db.transaction(async (tx) => {
     await tx.delete(mcpOAuthGrants).where(lt(mcpOAuthGrants.expiresAt, new Date()))
     await tx.insert(mcpOAuthGrants).values({
-      tokenHash: hash(code), userId: workspace, clientHash: consent.clientHash,
+      tokenHash: hash(code), userId: member.user, teamId: member.team, clientHash: consent.clientHash,
       kind: 'code', challenge: consent.challenge, redirectUri: consent.redirectUri,
       expiresAt: new Date(Date.now() + CODE_MS),
     })
@@ -199,15 +200,19 @@ export async function exchangeMcpToken(request: Request) {
       gt(mcpOAuthGrants.expiresAt, new Date()),
       isCode ? eq(mcpOAuthGrants.redirectUri, redirectUri!) : undefined,
       isCode ? eq(mcpOAuthGrants.challenge, digest(verifier!).digest('base64url')) : undefined,
-    )).returning({ workspace: mcpOAuthGrants.userId })
+    )).returning({ user: mcpOAuthGrants.userId, team: mcpOAuthGrants.teamId })
     if (!record) return
+    // Grants from before teams were for the person's own workspace, which became their personal team.
+    const team = record.team ?? record.user
+    // Someone who left the team can't refresh access to it.
+    if (!await teamRole(record.user, team)) return
     await tx.insert(mcpOAuthGrants).values({
-      tokenHash: hash(refreshToken), userId: record.workspace, clientHash: client.hash,
+      tokenHash: hash(refreshToken), userId: record.user, teamId: team, clientHash: client.hash,
       kind: 'refresh', expiresAt: new Date(Date.now() + REFRESH_MS),
     })
     return encode({
       secret: secret(), salt: MCP_OAUTH_TOKEN_SALT, maxAge: ACCESS_SECONDS,
-      token: { workspace: record.workspace, aud: resource(), agent: client.agent },
+      token: { workspace: team, user: record.user, aud: resource(), agent: client.agent },
     })
   })
   if (!result) return oauthError('invalid_grant')

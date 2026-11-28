@@ -8,7 +8,7 @@ import { acpAgent, readAcpSelection, type AcpToolActivity } from '../acp'
 import { DEFAULT_CHAT_ID, localAgentProvider } from '../ops'
 import type { Actor, Task } from '../types'
 import { AcpSessionError, withAcpSession } from './acp-session'
-import { currentWorkspace, dispatch, getBoard, hasBoard } from './store'
+import { currentUser, currentWorkspace, dispatch, getBoard, hasBoard } from './store'
 
 const UPDATE_INTERVAL = 50
 const runtime = globalThis as typeof globalThis & { __zekoAcpRuns?: Map<string, AbortController> }
@@ -121,7 +121,7 @@ async function runAgent(
       secret: process.env.AUTH_SECRET!,
       salt: ACP_RUN_TOKEN_SALT,
       maxAge: 11 * 60,
-      token: { workspace, board: boardId, task: taskId, run: runId, as: actor.name },
+      token: { workspace, user: currentUser() ?? workspace, board: boardId, task: taskId, run: runId, as: actor.name },
     }) : undefined
     const stream = createUIMessageStream({
       onError: (error) => {

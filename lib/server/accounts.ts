@@ -3,6 +3,7 @@ import 'server-only'
 import { createHash } from 'node:crypto'
 import { workspaceDatabase } from '../db/connection'
 import { oauthAccounts, users } from '../db/schema'
+import { ensurePersonalTeam } from './teams'
 
 export async function saveGoogleAccount(
   providerAccountId: string,
@@ -26,6 +27,7 @@ export async function saveGoogleAccount(
     await tx.insert(oauthAccounts).values({ provider: 'google', providerAccountId, userId }).onConflictDoNothing({
       target: [oauthAccounts.provider, oauthAccounts.providerAccountId],
     })
+    await ensurePersonalTeam(tx, userId, profile)
   })
 
   return userId

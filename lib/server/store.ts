@@ -13,6 +13,7 @@ import { addSamplePrototype, SAMPLE_ID, seedBoard } from '../seed'
 import { withDesignTokens } from '../tokens'
 import type { Actor, AgentPresence, Board, Op } from '../types'
 import { CanvasWriteConflict, databasePersistence } from './database'
+import { requestMember } from './teams'
 
 type Listener = (board: Board) => void
 type SeenAgent = Pick<AgentPresence, 'name' | 'lastSeen' | 'connectedAt' | 'mcpConnectedAt' | 'companion'> & { canvas: string }
@@ -154,8 +155,17 @@ export function withWorkspace<RequestType extends Request, Args extends unknown[
       return scope.run(storeFor(), handler, request, ...args)
     }
     if (!workspaceId(workspace)) return Promise.resolve(Response.json({ error: 'Sign in to Zeko.' }, { status: 401 }))
-    return scope.run(storeFor(workspace), handler, request, ...args)
+    return requestMember(request.headers).then((member) => member
+      ? people.run(member.user, () => scope.run(storeFor(workspace), handler, request, ...args))
+      : Response.json({ error: 'You’re no longer in this team. Reload to switch to another team.', code: 'team_access' }, { status: 403 }))
   }
+}
+
+/* The person behind the current request; the store above is shared by everyone in the team. */
+const people = new AsyncLocalStorage<string>()
+
+export function currentUser() {
+  return people.getStore()
 }
 
 export async function prepareStore(checkAccounts = false) {

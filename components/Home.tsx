@@ -29,6 +29,7 @@ import { returnToSignIn } from '@/lib/client/sign-in'
 import { AgentAvatar } from './AgentAvatar'
 import { CanvasPreview, SampleCanvasPreview, type CanvasCover } from './CanvasPreview'
 import { ConnectDialog } from './ConnectDialog'
+import { TeamMenu } from './TeamMenu'
 import { ChoiceSelect } from './ChoiceSelect'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
@@ -315,7 +316,8 @@ function HomeInner({ account }: { account?: ReactNode }) {
       <div className="flex h-full flex-col overflow-auto">
         {importInput}
         <header className="flex min-h-16 items-center justify-between gap-3 border-b border-border px-5 sm:px-10">
-          <div className="flex items-center gap-2 text-base font-semibold"><Mark size={24} /> zeko</div>
+          <div className="flex min-w-0 items-center gap-2 text-base font-semibold"><Mark size={24} /> zeko
+            {hosted && <div className="w-56 font-normal"><TeamMenu /></div>}</div>
           <div className="max-w-56 [&>form]:border-0 [&>form]:px-0">{account}</div>
         </header>
         <FirstCanvas busy={creating} onCreate={(name) => void create({ name }, 'canvas')}
@@ -345,6 +347,7 @@ function HomeInner({ account }: { account?: ReactNode }) {
               </button>
             </Tip>
           </div>
+          {hosted && <div className="pb-3"><TeamMenu /></div>}
           <nav className="px-2">
             <SideItem icon={<LayoutGrid size={14} />} active={view === 'all'} onClick={() => setView('all')} count={canvases?.length}>
               All canvases
