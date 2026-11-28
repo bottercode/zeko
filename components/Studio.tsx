@@ -598,7 +598,7 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       <div className="studio relative h-full overflow-hidden">
         <Canvas leftInset={leftInset} rightInset={rightInset} railLeft={railLeft} onShowLayers={leftClosed ? () => setLeftClosed(false) : undefined} />
         <TopBar connection={connection} saveState={saveState} onImport={importBoard} placeImages={placeImages}
-          connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} />
+          connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} alignWidth={panelClosed ? undefined : panelWidth} />
         <LeftPanel closed={leftClosed} onClose={() => setLeftClosed(true)} />
         {sampleGuide && <GettingStarted left={railLeft} />}
         <div className="absolute bottom-2 z-10" style={{ right: panelControlsOffset }}><ZoomPill /></div>

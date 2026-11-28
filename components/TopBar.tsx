@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Fragment, useEffect, useId, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { imageAccept, isBoardImage } from '@/lib/client/images'
 import { Check, CloudOff, Columns2, Download, Ellipsis, GitBranch, LayoutGrid, Link2, LoaderCircle, Play, Plug, Redo2, Search, Undo2, Upload, Waypoints, type LucideIcon } from 'lucide-react'
 import { agentIsOnline } from '@/lib/ops'
@@ -42,9 +42,13 @@ function useReachable(url: string) {
   return state
 }
 
-export function TopBar({ connection, saveState, onImport, placeImages, connectOpen, onConnectOpenChange }: {
+type CanvasAction = { label: string; hint: string; Icon: LucideIcon; run: () => void; accessibleLabel?: string; disabled?: boolean; keys?: string[] }
+
+export function TopBar({ connection, saveState, onImport, placeImages, connectOpen, onConnectOpenChange, alignWidth }: {
   connection: Connection; saveState: SaveState; onImport: (json: string) => Promise<string | null>; placeImages: (files: File[]) => Promise<void>;
   connectOpen: boolean; onConnectOpenChange: (open: boolean) => void
+  /** the open right panel's width: the board actions then span exactly the panel, so their edges line up */
+  alignWidth?: number
 }) {
   const { boardId, board, pageId, dispatch, selection, openLoupe, openSearch, openAlternates, openStateMap, confirm, toast, fit, undo, redo, history, now, play } = useStudio()
   const [address, setAddress] = useState(board.appUrl)
@@ -101,7 +105,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
       toast('Couldn’t copy the link. Copy it from your address bar instead.')
     }
   }
-  const canvasActions: { label: string; hint: string; Icon: LucideIcon; run: () => void; accessibleLabel?: string; disabled?: boolean; keys?: string[] }[][] = [
+  const canvasActions: CanvasAction[][] = [
     [
       { label: 'Arrange', hint: 'One row per route, states left to right', Icon: LayoutGrid, run: arrange },
       { label: 'Compare', hint: canCompare ? 'Compare in the loupe' : 'Select two frames, or one in a deck', keys: canCompare ? ['L'] : undefined, Icon: Columns2, run: () => openLoupe(), disabled: !canCompare },
@@ -152,7 +156,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
       </div>
 
       {/* Right: board actions */}
-      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2">
+      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2" style={alignWidth && !LIVE_FRAMES ? { width: alignWidth } : undefined}>
         {LIVE_FRAMES && (
           <form
             className="panel flex h-10 w-52 items-center gap-2 px-3"
@@ -175,40 +179,18 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
             />
           </form>
         )}
-        <Group className="hidden sm:flex">
-          {canvasActions.map((group, index) => (
-            <Fragment key={group[0]!.label}>
-              {index > 0 && <ToolbarDivider />}
-              {group.map(({ Icon, label, accessibleLabel, hint, keys, run, disabled }) => (
-                <Tip key={label} label={hint} keys={keys}>
-                  <GroupButton label={label} aria-label={accessibleLabel ?? label} onClick={run} disabled={disabled}>
-                    <Icon data-icon="inline-start" aria-hidden />
-                  </GroupButton>
-                </Tip>
-              ))}
-            </Fragment>
-          ))}
-        </Group>
-        <Group className="sm:hidden">
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Board actions" />}>
-              <Ellipsis aria-hidden />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
+        {alignWidth && !LIVE_FRAMES
+          ? <FittedActions groups={canvasActions} className="hidden min-w-0 flex-1 sm:flex" />
+          : <Group className="hidden sm:flex">
               {canvasActions.map((group, index) => (
                 <Fragment key={group[0]!.label}>
-                  {index > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuGroup>
-                    {group.map(({ Icon, label, accessibleLabel, run, disabled }) => (
-                      <DropdownMenuItem key={label} disabled={disabled} onClick={run}>
-                        <Icon aria-hidden /> {accessibleLabel ?? label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
+                  {index > 0 && <ToolbarDivider />}
+                  {group.map((action) => <ActionButton key={action.label} action={action} />)}
                 </Fragment>
               ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </Group>}
+        <Group className="sm:hidden">
+          <ActionsMenu groups={canvasActions} label="Board actions" />
         </Group>
         <input
           id={fileInputId}
@@ -300,6 +282,123 @@ function CanvasConnection({ connection, saveState }: { connection: Connection; s
   )
 }
 
+function ActionButton({ action, labelled }: { action: CanvasAction; labelled?: boolean }) {
+  const { Icon, label, accessibleLabel, hint, keys, run, disabled } = action
+  return (
+    <Tip label={hint} keys={keys}>
+      <GroupButton label={label} labelled={labelled} aria-label={accessibleLabel ?? label} onClick={run} disabled={disabled}>
+        <Icon data-icon="inline-start" aria-hidden />
+      </GroupButton>
+    </Tip>
+  )
+}
+
+function ActionsMenu({ groups, label }: { groups: CanvasAction[][]; label: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={label} />}>
+        <Ellipsis aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        {groups.map((group, index) => (
+          <Fragment key={group[0]!.label}>
+            {index > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuGroup>
+              {group.map(({ Icon, label: name, accessibleLabel, run, disabled }) => (
+                <DropdownMenuItem key={name} disabled={disabled} onClick={run}>
+                  <Icon aria-hidden /> {accessibleLabel ?? name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const DIVIDER_WIDTH = 9 // 1px line with 4px on each side
+const BUTTON_GAP = 2
+
+/**
+ * Board actions in a fixed width: all labelled when they fit; else as many labelled as fit (at least half)
+ * with the rest under a "More" menu; else icons only, again with a "More" menu when even those do not fit.
+ * A hidden copy measures every button.
+ */
+function FittedActions({ groups, className }: { groups: CanvasAction[][]; className?: string }) {
+  const box = useRef<HTMLDivElement>(null)
+  const ruler = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState<{ labelled: boolean; count: number }>({ labelled: false, count: Infinity })
+  const flat = groups.flatMap((group, groupIndex) => group.map((action) => ({ action, groupIndex })))
+  const signature = flat.map(({ action }) => action.label).join('|')
+
+  useLayoutEffect(() => {
+    const container = box.current
+    const measure = ruler.current
+    if (!container || !measure) return
+    const update = () => {
+      const style = getComputedStyle(container)
+      const room = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const labelled = [...measure.querySelectorAll<HTMLElement>('[data-measure="labelled"]')].map((el) => el.offsetWidth)
+      const icons = [...measure.querySelectorAll<HTMLElement>('[data-measure="icon"]')].map((el) => el.offsetWidth)
+      const more = measure.querySelector<HTMLElement>('[data-measure="more"]')?.offsetWidth ?? 32
+      const span = (widths: number[], count: number, withMore: boolean) => {
+        let total = 0
+        for (let i = 0; i < count; i++) {
+          if (i > 0) total += BUTTON_GAP + (flat[i]!.groupIndex !== flat[i - 1]!.groupIndex ? DIVIDER_WIDTH : 0)
+          total += widths[i]!
+        }
+        return withMore ? total + (count ? BUTTON_GAP + DIVIDER_WIDTH : 0) + more : total
+      }
+      if (span(labelled, flat.length, false) <= room) return setFit({ labelled: true, count: flat.length })
+      const most = (widths: number[]) => {
+        let count = flat.length - 1
+        while (count > 0 && span(widths, count, true) > room) count--
+        return count
+      }
+      // Labels read better than a row of icons with empty space beside it, so keep them while at least half fit.
+      const withLabels = most(labelled)
+      if (withLabels >= Math.ceil(flat.length / 2)) return setFit({ labelled: true, count: withLabels })
+      if (span(icons, flat.length, false) <= room) return setFit({ labelled: false, count: flat.length })
+      setFit({ labelled: false, count: most(icons) })
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    return () => observer.disconnect()
+    // The labels decide the widths; re-measure when the set of actions changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature])
+
+  const shown = flat.slice(0, fit.count)
+  const hidden = flat.slice(fit.count)
+  const hiddenGroups = groups.map((_, index) => hidden.filter((item) => item.groupIndex === index).map((item) => item.action)).filter((group) => group.length)
+
+  return (
+    <div ref={box} className={cx('panel relative h-10 items-center gap-0.5 overflow-hidden px-1', className)}>
+      {shown.map(({ action, groupIndex }, index) => (
+        <Fragment key={action.label}>
+          {index > 0 && shown[index - 1]!.groupIndex !== groupIndex && <ToolbarDivider />}
+          <ActionButton action={action} labelled={fit.labelled} />
+        </Fragment>
+      ))}
+      {hiddenGroups.length > 0 && <>
+        {shown.length > 0 && <ToolbarDivider />}
+        <Tip label="More board actions"><ActionsMenu groups={hiddenGroups} label="More board actions" /></Tip>
+      </>}
+      <div ref={ruler} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 flex" inert>
+        {flat.map(({ action }) => (
+          <Fragment key={action.label}>
+            <span data-measure="labelled" className="flex"><GroupButton label={action.label} labelled tabIndex={-1}><action.Icon data-icon="inline-start" /></GroupButton></span>
+            <span data-measure="icon" className="flex"><GroupButton label={action.label} labelled={false} tabIndex={-1}><action.Icon data-icon="inline-start" /></GroupButton></span>
+          </Fragment>
+        ))}
+        <span data-measure="more" className="flex"><Button variant="ghost" size="icon" tabIndex={-1}><Ellipsis /></Button></span>
+      </div>
+    </div>
+  )
+}
+
 function ToolbarDivider() {
   return <Separator orientation="vertical" className="editor-divider mx-1 h-4 data-vertical:self-center" />
 }
@@ -308,7 +407,7 @@ function Group({ children, className }: { children: React.ReactNode; className?:
   return <div className={cx('panel flex h-10 items-center gap-0.5 px-1', className)}>{children}</div>
 }
 
-function GroupButton({ children, label, className, ...props }: Omit<React.ComponentProps<typeof Button>, 'className'> & { label: string; className?: string }) {
+function GroupButton({ children, label, labelled, className, ...props }: Omit<React.ComponentProps<typeof Button>, 'className'> & { label: string; labelled?: boolean; className?: string }) {
   return (
     <Button
       variant="ghost"
@@ -317,7 +416,7 @@ function GroupButton({ children, label, className, ...props }: Omit<React.Compon
       className={cx('px-2', className)}
     >
       {children}
-      <span aria-hidden className="hidden xl:inline">{label}</span>
+      <span aria-hidden className={labelled === undefined ? 'hidden xl:inline' : labelled ? 'inline' : 'hidden'}>{label}</span>
     </Button>
   )
 }
