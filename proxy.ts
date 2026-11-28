@@ -100,7 +100,7 @@ export async function proxy(request: NextRequest) {
   if (
     pathname === '/login' ||
     pathname.startsWith('/api/auth/') ||
-    (read && (pathname.startsWith('/_next/static/') || pathname === '/favicon.ico' || pathname === '/auth/google-sign-in.png'))
+    (read && (pathname.startsWith('/_next/static/') || pathname === '/icon.svg' || pathname === '/apple-icon.png' || pathname === '/auth/google-sign-in.png'))
   ) {
     return NextResponse.next({ request: { headers } })
   }
