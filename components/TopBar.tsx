@@ -156,7 +156,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
       </div>
 
       {/* Right: board actions */}
-      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2" style={alignWidth && !LIVE_FRAMES ? { width: alignWidth } : undefined}>
+      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2" style={alignWidth && !LIVE_FRAMES ? { width: alignWidth, minWidth: 'min-content' } : undefined}>
         {LIVE_FRAMES && (
           <form
             className="panel flex h-10 w-52 items-center gap-2 px-3"
@@ -180,14 +180,16 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
           </form>
         )}
         {alignWidth && !LIVE_FRAMES
-          ? <FittedActions groups={canvasActions} className="hidden min-w-0 flex-1 sm:flex" />
+          ? <FittedActions groups={[canvasActions[0]!, canvasActions[2]!]} menu={[canvasActions[1]!]} className="hidden min-w-0 flex-1 sm:flex" />
           : <Group className="hidden sm:flex">
-              {canvasActions.map((group, index) => (
+              {[canvasActions[0]!, canvasActions[2]!].map((group, index) => (
                 <Fragment key={group[0]!.label}>
                   {index > 0 && <ToolbarDivider />}
                   {group.map((action) => <ActionButton key={action.label} action={action} />)}
                 </Fragment>
               ))}
+              <ToolbarDivider />
+              <Tip label="More board actions"><ActionsMenu groups={[canvasActions[1]!]} label="More board actions" /></Tip>
             </Group>}
         <Group className="sm:hidden">
           <ActionsMenu groups={canvasActions} label="Board actions" />
@@ -321,16 +323,17 @@ const DIVIDER_WIDTH = 9 // 1px line with 4px on each side
 const BUTTON_GAP = 2
 
 /**
- * Board actions in a fixed width: all labelled when they fit; else as many labelled as fit (at least half)
- * with the rest under a "More" menu; else icons only, again with a "More" menu when even those do not fit.
- * A hidden copy measures every button.
+ * Board actions in the width of the side panel, with `menu` (Import, Export) always under "More" and every other
+ * action always in the bar, labelled from the first action for as many as fit, the rest as icons. When even the icons don't
+ * fit, the bar keeps its icons and grows past the panel's edge rather than hiding any of them.
  */
-function FittedActions({ groups, className }: { groups: CanvasAction[][]; className?: string }) {
+function FittedActions({ groups, menu, className }: { groups: CanvasAction[][]; menu: CanvasAction[][]; className?: string }) {
   const box = useRef<HTMLDivElement>(null)
   const ruler = useRef<HTMLDivElement>(null)
-  const [fit, setFit] = useState<{ labelled: boolean; count: number }>({ labelled: false, count: Infinity })
+  // labelled: how many actions, from the first, show labels; least: the width of the bar with only icons.
+  const [fit, setFit] = useState({ labelled: 0, least: 0 })
   const flat = groups.flatMap((group, groupIndex) => group.map((action) => ({ action, groupIndex })))
-  const signature = flat.map(({ action }) => action.label).join('|')
+  const signature = [...flat.map(({ action }) => action.label), ...menu.flat().map((action) => action.label)].join('|')
 
   useLayoutEffect(() => {
     const container = box.current
@@ -338,29 +341,17 @@ function FittedActions({ groups, className }: { groups: CanvasAction[][]; classN
     if (!container || !measure) return
     const update = () => {
       const style = getComputedStyle(container)
-      const room = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+      const room = container.clientWidth - padding
       const labelled = [...measure.querySelectorAll<HTMLElement>('[data-measure="labelled"]')].map((el) => el.offsetWidth)
       const icons = [...measure.querySelectorAll<HTMLElement>('[data-measure="icon"]')].map((el) => el.offsetWidth)
       const more = measure.querySelector<HTMLElement>('[data-measure="more"]')?.offsetWidth ?? 32
-      const span = (widths: number[], count: number, withMore: boolean) => {
-        let total = 0
-        for (let i = 0; i < count; i++) {
-          if (i > 0) total += BUTTON_GAP + (flat[i]!.groupIndex !== flat[i - 1]!.groupIndex ? DIVIDER_WIDTH : 0)
-          total += widths[i]!
-        }
-        return withMore ? total + (count ? BUTTON_GAP + DIVIDER_WIDTH : 0) + more : total
-      }
-      if (span(labelled, flat.length, false) <= room) return setFit({ labelled: true, count: flat.length })
-      const most = (widths: number[]) => {
-        let count = flat.length - 1
-        while (count > 0 && span(widths, count, true) > room) count--
-        return count
-      }
-      // Labels read better than a row of icons with empty space beside it, so keep them while at least half fit.
-      const withLabels = most(labelled)
-      if (withLabels >= Math.ceil(flat.length / 2)) return setFit({ labelled: true, count: withLabels })
-      if (span(icons, flat.length, false) <= room) return setFit({ labelled: false, count: flat.length })
-      setFit({ labelled: false, count: most(icons) })
+      const span = (count: number) => flat.reduce((total, item, i) =>
+        total + (i > 0 ? BUTTON_GAP + (item.groupIndex !== flat[i - 1]!.groupIndex ? DIVIDER_WIDTH : 0) : 0)
+          + (i < count ? labelled[i]! : icons[i]!), 0) + BUTTON_GAP + DIVIDER_WIDTH + more
+      let count = flat.length
+      while (count > 0 && span(count) > room) count--
+      setFit({ labelled: count, least: Math.ceil(span(0) + padding) })
     }
     update()
     const observer = new ResizeObserver(update)
@@ -370,22 +361,16 @@ function FittedActions({ groups, className }: { groups: CanvasAction[][]; classN
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature])
 
-  const shown = flat.slice(0, fit.count)
-  const hidden = flat.slice(fit.count)
-  const hiddenGroups = groups.map((_, index) => hidden.filter((item) => item.groupIndex === index).map((item) => item.action)).filter((group) => group.length)
-
   return (
-    <div ref={box} className={cx('panel relative h-10 items-center gap-0.5 overflow-hidden px-1', className)}>
-      {shown.map(({ action, groupIndex }, index) => (
+    <div ref={box} style={fit.least ? { minWidth: fit.least } : undefined} className={cx('panel relative h-10 items-center gap-0.5 overflow-hidden px-1', className)}>
+      {flat.map(({ action, groupIndex }, index) => (
         <Fragment key={action.label}>
-          {index > 0 && shown[index - 1]!.groupIndex !== groupIndex && <ToolbarDivider />}
-          <ActionButton action={action} labelled={fit.labelled} />
+          {index > 0 && flat[index - 1]!.groupIndex !== groupIndex && <ToolbarDivider />}
+          <ActionButton action={action} labelled={index < fit.labelled} />
         </Fragment>
       ))}
-      {hiddenGroups.length > 0 && <>
-        {shown.length > 0 && <ToolbarDivider />}
-        <Tip label="More board actions"><ActionsMenu groups={hiddenGroups} label="More board actions" /></Tip>
-      </>}
+      <ToolbarDivider />
+      <Tip label="More board actions"><ActionsMenu groups={menu} label="More board actions" /></Tip>
       <div ref={ruler} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 flex" inert>
         {flat.map(({ action }) => (
           <Fragment key={action.label}>
