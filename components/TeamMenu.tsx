@@ -75,7 +75,7 @@ export function TeamMenu() {
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuItem onClick={() => setSettings(true)}><Settings aria-hidden /> Team settings</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCreating(true)}><Plus aria-hidden /> Create team</DropdownMenuItem>
+            {state.canCreate && <DropdownMenuItem onClick={() => setCreating(true)}><Plus aria-hidden /> Create team</DropdownMenuItem>}
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>

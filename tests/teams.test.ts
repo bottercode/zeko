@@ -25,6 +25,14 @@ async function person(name: string) {
   return userId
 }
 
+/** A team made directly, since people can't start more than their personal team through Zeko for now. */
+async function makeTeam(owner: string, name: string) {
+  const teamId = id()
+  await db.insert(schema.teams).values({ id: teamId, name: teams.teamName(name), createdBy: owner })
+  await db.insert(schema.teamMembers).values({ teamId, userId: owner, role: 'owner' })
+  return teamId
+}
+
 before(async () => {
   if (skip) return
   teams = await import('../lib/server/teams')
@@ -48,6 +56,13 @@ test('everyone starts in a personal team they own, with their user ID', { skip }
   assert.equal((await teams.listTeams(ada)).length, 1)
 })
 
+test('for now, nobody can start a team beyond their personal one', { skip }, async () => {
+  const ada = await person('Ada')
+  assert.equal(await teams.teamsStarted(ada), 1)
+  await assert.rejects(teams.createTeam(ada, 'Studio'), /everyone has one team/)
+  assert.equal((await teams.listTeams(ada)).length, 1)
+})
+
 test('the personal team can be neither left nor deleted', { skip }, async () => {
   const ada = await person('Ada')
   await assert.rejects(teams.leaveTeam(ada, ada), /can’t leave your personal team/)
@@ -58,7 +73,7 @@ test('the personal team can be neither left nor deleted', { skip }, async () => 
 test('create a team, invite by link, join, and share it', { skip }, async () => {
   const ada = await person('Ada')
   const bo = await person('Bo')
-  const team = await teams.createTeam(ada, '  Design   studio ')
+  const team = await makeTeam(ada, '  Design   studio ')
   assert.equal((await teams.teamById(team))?.name, 'Design studio')
   assert.equal(await teams.teamRole(bo, team), null)
 
@@ -81,7 +96,7 @@ test('create a team, invite by link, join, and share it', { skip }, async () => 
 test('only owners manage the team', { skip }, async () => {
   const ada = await person('Ada')
   const bo = await person('Bo')
-  const team = await teams.createTeam(ada, 'Studio')
+  const team = await makeTeam(ada, 'Studio')
   await teams.acceptInvite(bo, await teams.resetInvite(ada, team))
   await assert.rejects(teams.renameTeam(bo, team, 'Mine now'), /Only the team’s owners/)
   await assert.rejects(teams.resetInvite(bo, team), /Only the team’s owners/)
@@ -94,7 +109,7 @@ test('only owners manage the team', { skip }, async () => {
 test('a team always keeps an owner', { skip }, async () => {
   const ada = await person('Ada')
   const bo = await person('Bo')
-  const team = await teams.createTeam(ada, 'Studio')
+  const team = await makeTeam(ada, 'Studio')
   await teams.acceptInvite(bo, await teams.resetInvite(ada, team))
   await assert.rejects(teams.setMemberRole(ada, team, ada, 'member'), /at least one owner/)
   await assert.rejects(teams.leaveTeam(ada, team), /someone else an owner/)
@@ -108,7 +123,7 @@ test('a team always keeps an owner', { skip }, async () => {
 test('removing someone ends their access at once, and they fall back to their personal team', { skip }, async () => {
   const ada = await person('Ada')
   const bo = await person('Bo')
-  const team = await teams.createTeam(ada, 'Studio')
+  const team = await makeTeam(ada, 'Studio')
   await teams.acceptInvite(bo, await teams.resetInvite(ada, team))
   await teams.rememberTeam(bo, team)
   assert.equal(await teams.activeTeamFor(bo), team)
@@ -123,18 +138,18 @@ test('removing someone ends their access at once, and they fall back to their pe
 test('requests without a user act for the workspace itself, as tokens from before teams did', { skip }, async () => {
   const ada = await person('Ada')
   assert.equal((await teams.requestMember(new Headers({ 'x-zeko-workspace': ada })))?.user, ada)
-  const team = await teams.createTeam(ada, 'Studio')
+  const team = await makeTeam(ada, 'Studio')
   // A team ID alone is not a person, so it gets no access.
   assert.equal(await teams.requestMember(new Headers({ 'x-zeko-workspace': team })), null)
 })
 
 test('the last person leaving a team deletes it; deleting a team removes its canvases', { skip }, async () => {
   const ada = await person('Ada')
-  const solo = await teams.createTeam(ada, 'Solo')
+  const solo = await makeTeam(ada, 'Solo')
   await teams.leaveTeam(ada, solo)
   assert.equal(await teams.teamById(solo), undefined)
 
-  const team = await teams.createTeam(ada, 'Studio')
+  const team = await makeTeam(ada, 'Studio')
   await db.insert(schema.accountCanvases).values({ ownerId: team, id: 'c1', snapshot: { name: 'x' } as never, revision: '00000000-0000-0000-0000-000000000009' })
   await teams.deleteTeam(ada, team)
   const { eq } = await import('drizzle-orm')

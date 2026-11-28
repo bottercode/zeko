@@ -5,7 +5,7 @@ import { signOut, updateSession } from '@/auth'
 import { googleAuthConfigured, USER_HEADER, workspaceId, WORKSPACE_HEADER } from '@/lib/auth-access'
 import {
   acceptInvite, activeTeamFor, createTeam, deleteTeam, leaveTeam, listTeams, removeMember, renameTeam, resetInvite,
-  setMemberRole, teamById, TeamError, teamMembersOf, teamRole, type TeamMember, type TeamRole, type TeamSummary,
+  setMemberRole, teamById, TeamError, teamMembersOf, teamRole, teamsStarted, TEAMS_PER_PERSON, type TeamMember, type TeamRole, type TeamSummary,
 } from '@/lib/server/teams'
 
 type Result<T = null> = { ok: true; value: T } | { ok: false; error: string }
@@ -35,13 +35,13 @@ async function open(user: string, team: string) {
   await updateSession({ team } as Parameters<typeof updateSession>[0])
 }
 
-export interface TeamsState { teams: TeamSummary[]; current: string }
+export interface TeamsState { teams: TeamSummary[]; current: string; canCreate: boolean }
 
 export async function teamsState(): Promise<Result<TeamsState>> {
   return attempt(async () => {
     const { user, team } = await person()
-    const teams = await listTeams(user)
-    return { teams, current: team && teams.some((item) => item.id === team) ? team : user }
+    const [teams, started] = await Promise.all([listTeams(user), teamsStarted(user)])
+    return { teams, current: team && teams.some((item) => item.id === team) ? team : user, canCreate: started < TEAMS_PER_PERSON }
   })
 }
 

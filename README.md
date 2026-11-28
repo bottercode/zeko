@@ -68,6 +68,8 @@ Google sign-in saves the user's profile and latest sign-in time in `zeko.users` 
 
 Until Google is configured, the browser uses HTTP Basic with username `zeko` and the preview password. Hosted MCP clients sign in through the browser with the same Google workspace. The hosted database role needs SELECT, INSERT, and DELETE on `zeko.mcp_oauth_grants`. Existing Basic-auth MCP credentials point to the original workspace.
 
+Every person belongs to a team: their personal team, created at sign-in, and any they join by invite. For now nobody can start another team (`TEAMS_PER_PERSON` in `lib/server/teams.ts`). Teams live in `zeko.teams`, memberships in `zeko.team_members`, and invite links in `zeko.team_invites`. The hosted database role needs SELECT, INSERT, UPDATE, and DELETE on `zeko.teams` and `zeko.team_members`, and SELECT, INSERT, and DELETE on `zeko.team_invites`. Migrations run as the database owner, so grant these by hand after `npm run db:migrate` creates the tables.
+
 ## Alternates
 
 Explore several directions for one screen without losing any. Select a frame and press **B** (or **Alternates** in the

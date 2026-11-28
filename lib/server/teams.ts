@@ -15,6 +15,8 @@ export class TeamError extends Error {}
 export const TEAM_NAME_LIMIT = 60
 const INVITE_MS = 7 * 24 * 60 * 60 * 1000
 const MEMBERSHIP_MS = 15_000
+/** Teams one person may start, their personal team included. For now that is only the personal team; people join others by invite. */
+export const TEAMS_PER_PERSON = 1
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const db = () => workspaceDatabase()
@@ -103,9 +105,17 @@ export async function teamMembersOf(userId: string, teamId: string): Promise<Tea
   return rows.map(({ joinedAt: _, ...row }) => ({ ...row, you: row.id === userId }))
 }
 
+export async function teamsStarted(userId: string) {
+  const [row] = await db().select({ teams: count() }).from(teams).where(eq(teams.createdBy, userId))
+  return Number(row?.teams ?? 0)
+}
+
 export async function createTeam(userId: string, name: unknown) {
-  const id = randomBytes(32).toString('hex')
   const value = teamName(name)
+  if (await teamsStarted(userId) >= TEAMS_PER_PERSON) {
+    throw new TeamError('For now, everyone has one team. Invite people to yours to work together.')
+  }
+  const id = randomBytes(32).toString('hex')
   await db().transaction(async (tx) => {
     await tx.insert(teams).values({ id, name: value, createdBy: userId })
     await tx.insert(teamMembers).values({ teamId: id, userId, role: 'owner' })
