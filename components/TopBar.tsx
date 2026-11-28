@@ -44,11 +44,13 @@ function useReachable(url: string) {
 
 type CanvasAction = { label: string; hint: string; Icon: LucideIcon; run: () => void; accessibleLabel?: string; disabled?: boolean; keys?: string[] }
 
-export function TopBar({ connection, saveState, onImport, placeImages, connectOpen, onConnectOpenChange, alignWidth }: {
+export function TopBar({ connection, saveState, onImport, placeImages, connectOpen, onConnectOpenChange, alignWidth, onAlignedWidth }: {
   connection: Connection; saveState: SaveState; onImport: (json: string) => Promise<string | null>; placeImages: (files: File[]) => Promise<void>;
   connectOpen: boolean; onConnectOpenChange: (open: boolean) => void
   /** the open right panel's width: the board actions then span exactly the panel, so their edges line up */
   alignWidth?: number
+  /** The width the aligned actions and Connect button use, so the side panel below can end where they end. */
+  onAlignedWidth?: (width: number) => void
 }) {
   const { boardId, board, pageId, dispatch, selection, openLoupe, openSearch, openAlternates, openStateMap, confirm, toast, fit, undo, redo, history, now, play } = useStudio()
   const [address, setAddress] = useState(board.appUrl)
@@ -156,7 +158,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
       </div>
 
       {/* Right: board actions */}
-      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2" style={alignWidth && !LIVE_FRAMES ? { width: alignWidth, minWidth: 'min-content' } : undefined}>
+      <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2">
         {LIVE_FRAMES && (
           <form
             className="panel flex h-10 w-52 items-center gap-2 px-3"
@@ -180,7 +182,7 @@ export function TopBar({ connection, saveState, onImport, placeImages, connectOp
           </form>
         )}
         {alignWidth && !LIVE_FRAMES
-          ? <FittedActions groups={[canvasActions[0]!, canvasActions[2]!]} menu={[canvasActions[1]!]} className="hidden min-w-0 flex-1 sm:flex" />
+          ? <FittedActions groups={[canvasActions[0]!, canvasActions[2]!]} menu={[canvasActions[1]!]} available={alignWidth} onWidth={onAlignedWidth} className="hidden sm:flex" />
           : <Group className="hidden sm:flex">
               {[canvasActions[0]!, canvasActions[2]!].map((group, index) => (
                 <Fragment key={group[0]!.label}>
@@ -323,26 +325,35 @@ const DIVIDER_WIDTH = 9 // 1px line with 4px on each side
 const BUTTON_GAP = 2
 
 /**
- * Board actions in the width of the side panel, with `menu` (Import, Export) always under "More" and every other
- * action always in the bar, labelled from the first action for as many as fit, the rest as icons. When even the icons don't
- * fit, the bar keeps its icons and grows past the panel's edge rather than hiding any of them.
+ * Board actions sized to the side panel below, with `menu` (Import, Export) always under "More" and every other
+ * action always in the bar: labelled from the first action for as many as fit in `available` (the panel's width,
+ * Connect button included), the rest as icons. The bar is exactly as wide as its buttons, and `onWidth` reports the
+ * width it and the Connect button use, so the panel ends where they end instead of leaving a gap. When even the
+ * icons don't fit, the bar keeps its icons and the panel widens to match rather than hiding any.
  */
-function FittedActions({ groups, menu, className }: { groups: CanvasAction[][]; menu: CanvasAction[][]; className?: string }) {
+function FittedActions({ groups, menu, available, onWidth, className }: {
+  groups: CanvasAction[][]; menu: CanvasAction[][]; available: number; onWidth?: (width: number) => void; className?: string
+}) {
   const box = useRef<HTMLDivElement>(null)
   const ruler = useRef<HTMLDivElement>(null)
-  // labelled: how many actions, from the first, show labels; least: the width of the bar with only icons.
-  const [fit, setFit] = useState({ labelled: 0, least: 0 })
+  // labelled: how many actions, from the first, show labels; width: the bar's width with those labels.
+  const [fit, setFit] = useState({ labelled: 0, width: 0 })
   const flat = groups.flatMap((group, groupIndex) => group.map((action) => ({ action, groupIndex })))
   const signature = [...flat.map(({ action }) => action.label), ...menu.flat().map((action) => action.label)].join('|')
+  const reported = useRef(onWidth)
+  useLayoutEffect(() => { reported.current = onWidth })
 
   useLayoutEffect(() => {
     const container = box.current
     const measure = ruler.current
-    if (!container || !measure) return
+    const row = container?.parentElement
+    if (!container || !measure || !row) return
     const update = () => {
       const style = getComputedStyle(container)
-      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
-      const room = container.clientWidth - padding
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth)
+      // Everything in the row beside the bar: the Connect button and the gap before it.
+      const beside = row.getBoundingClientRect().width - container.getBoundingClientRect().width
+      const room = available - beside - padding
       const labelled = [...measure.querySelectorAll<HTMLElement>('[data-measure="labelled"]')].map((el) => el.offsetWidth)
       const icons = [...measure.querySelectorAll<HTMLElement>('[data-measure="icon"]')].map((el) => el.offsetWidth)
       const more = measure.querySelector<HTMLElement>('[data-measure="more"]')?.offsetWidth ?? 32
@@ -351,18 +362,23 @@ function FittedActions({ groups, menu, className }: { groups: CanvasAction[][]; 
           + (i < count ? labelled[i]! : icons[i]!), 0) + BUTTON_GAP + DIVIDER_WIDTH + more
       let count = flat.length
       while (count > 0 && span(count) > room) count--
-      setFit({ labelled: count, least: Math.ceil(span(0) + padding) })
+      const width = Math.ceil(span(count) + padding)
+      setFit((last) => last.labelled === count && last.width === width ? last : { labelled: count, width })
+      reported.current?.(Math.round(beside + width))
     }
     update()
     const observer = new ResizeObserver(update)
-    observer.observe(container)
+    observer.observe(row)
     return () => observer.disconnect()
-    // The labels decide the widths; re-measure when the set of actions changes.
+    // The labels decide the widths; re-measure when the set of actions or the room changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature])
+  }, [signature, available])
+
+  // Back to the panel's own width when the bar goes away (the panel closes or the window gets narrow).
+  useEffect(() => () => reported.current?.(0), [])
 
   return (
-    <div ref={box} style={fit.least ? { minWidth: fit.least } : undefined} className={cx('panel relative h-10 items-center gap-0.5 overflow-hidden px-1', className)}>
+    <div ref={box} style={fit.width ? { width: fit.width } : undefined} className={cx('panel relative h-10 shrink-0 items-center gap-0.5 overflow-hidden px-1', className)}>
       {flat.map(({ action, groupIndex }, index) => (
         <Fragment key={action.label}>
           {index > 0 && flat[index - 1]!.groupIndex !== groupIndex && <ToolbarDivider />}

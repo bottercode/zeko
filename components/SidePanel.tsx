@@ -30,6 +30,8 @@ interface SidePanelProps {
   closed: boolean
   onClosedChange: (closed: boolean) => void
   onResize: (width: number) => void
+  /** The width the panel shows, when it fits itself to the toolbar above; `width` stays the one being resized. */
+  shownWidth?: number
 }
 
 export function DesignPanel({ open, right, width, overlay, onOpenChange }: {
@@ -60,7 +62,7 @@ export function DesignPanel({ open, right, width, overlay, onOpenChange }: {
   )
 }
 
-export function SidePanel({ agentPanelRequest, width, maxWidth, closed, onClosedChange, onResize }: SidePanelProps) {
+export function SidePanel({ agentPanelRequest, width, maxWidth, closed, onClosedChange, onResize, shownWidth }: SidePanelProps) {
   const { board, pageId } = useStudio()
   const [selection, setSelection] = useState<{ tab: Tab; request: number }>({ tab: 'agents', request: 0 })
   const tab = selection.request === agentPanelRequest ? selection.tab : 'agents'
@@ -85,7 +87,7 @@ export function SidePanel({ agentPanelRequest, width, maxWidth, closed, onClosed
           ))}
         </div>
       )}
-      <div className="pointer-events-none absolute top-14 right-2 bottom-2 z-10 flex flex-col" style={{ width }}>
+      <div className="pointer-events-none absolute top-14 right-2 bottom-2 z-10 flex flex-col" style={{ width: shownWidth ?? width }}>
         <aside hidden={closed} id="studio-side-panel" aria-label="Right panel" className="panel right-panel pointer-events-auto relative flex min-h-0 flex-1 flex-col">
           <Tabs value={tab} onValueChange={(value) => show(value as Tab)} className="min-h-0 flex-1 gap-0 overflow-hidden rounded-[inherit]">
             <div className="editor-divider flex h-11 shrink-0 items-center justify-between gap-1 border-b px-2">

@@ -94,6 +94,9 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const leftInset = railLeft + 56
   const maxPanelWidth = Math.max(SIDE_PANEL.minWidth, Math.min(SIDE_PANEL.maxWidth, viewport - leftInset - 200))
   const panelWidth = Math.max(SIDE_PANEL.minWidth, Math.min(maxPanelWidth, preferredPanelWidth))
+  // The toolbar above the panel fits its buttons to this width and reports what it used; the panel ends where it ends.
+  const [toolbarWidth, setToolbarWidth] = useState(0)
+  const shownPanelWidth = toolbarWidth || panelWidth
 
   useEffect(() => {
     try {
@@ -129,14 +132,14 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
   const [designPreference, setDesignPreference] = useState<{ selectionKey: string; open: boolean } | null>(null)
   const selectionKey = JSON.stringify([selection, interactId, element?.path])
   if (designPreference && designPreference.selectionKey !== selectionKey) setDesignPreference(null)
-  const designRight = panelClosed ? 56 : panelWidth + 18
+  const designRight = panelClosed ? 56 : shownPanelWidth + 18
   const designFitsBesideAgents = viewport >= designRight + DESIGN_PANEL_WIDTH + 8
   const designFitsCanvas = viewport >= leftInset + designRight + DESIGN_PANEL_WIDTH + 180
   const designOpen = selection.length > 0 && (designPreference?.selectionKey === selectionKey ? designPreference.open : designFitsCanvas)
   const designOffset = designOpen ? (designFitsBesideAgents ? designRight : 8) : Math.min(designRight, Math.max(8, viewport - 48))
   const designInset = designOpen && designFitsCanvas ? DESIGN_PANEL_WIDTH + 10 : 0
-  const panelControlsOffset = (panelClosed ? 8 : panelWidth + 16) + designInset
-  const rightInset = (panelClosed ? 56 : panelWidth + 20) + designInset
+  const panelControlsOffset = (panelClosed ? 8 : shownPanelWidth + 16) + designInset
+  const rightInset = (panelClosed ? 56 : shownPanelWidth + 20) + designInset
   const [draft, setDraft] = useState<Draft | null>(null)
   const [thread, setThread] = useState<{ id: string; location: 'canvas' | 'panel' } | null>(null)
   const openThread = thread?.id ?? null
@@ -598,13 +601,14 @@ function StudioInner({ boardId, sampleGuide, firstCanvas }: StudioProps) {
       <div className="studio relative h-full overflow-hidden">
         <Canvas leftInset={leftInset} rightInset={rightInset} railLeft={railLeft} onShowLayers={leftClosed ? () => setLeftClosed(false) : undefined} />
         <TopBar connection={connection} saveState={saveState} onImport={importBoard} placeImages={placeImages}
-          connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} alignWidth={panelClosed ? undefined : panelWidth} />
+          connectOpen={connectOpen} onConnectOpenChange={setConnectOpen} alignWidth={panelClosed ? undefined : panelWidth} onAlignedWidth={setToolbarWidth} />
         <LeftPanel closed={leftClosed} onClose={() => setLeftClosed(true)} />
         {sampleGuide && <GettingStarted left={railLeft} />}
         <div className="absolute bottom-2 z-10" style={{ right: panelControlsOffset }}><ZoomPill /></div>
         <SidePanel
           agentPanelRequest={agentPanelRequest}
           width={panelWidth}
+          shownWidth={shownPanelWidth}
           maxWidth={maxPanelWidth}
           closed={panelClosed}
           onClosedChange={setPanelClosed}
