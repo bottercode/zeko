@@ -86,7 +86,7 @@ async function runAgent(
   const prompt = [
     `You are working on Zeko canvas ${JSON.stringify(boardId)}, request ${JSON.stringify(taskId)}.`,
     'Answer questions directly. Start canvas work with the context below. Call get_board when you need other frames, the full guidelines or token set, or updated canvas state. Use the page ID below for new sketches. Call complete_task with the actual result frame IDs and finish with a brief reply.',
-    'If the request names a canvas skill or clearly matches a skill description, read it with get_skill before designing.',
+    'For design work, read get_guide with topic "design" first. If the request names a canvas skill or clearly matches a skill description, also read it with get_skill before designing.',
     'For specific text, style, and layout edits, use get_layers and edit_layers. Batch related layer changes with the revision from get_layers and verify the result on the canvas.',
     'For a design, call set_status when you start. Publish the first meaningful section with create_sketch (streaming: true and a <!-- zeko:stream --> marker). Send each next section with append_to_sketch, before that marker, and set done: true on the last one. Put the first version on the canvas before sourcing images or polishing. Do not use shell commands or edit workspace files.',
     DESIGN_BRIEF,

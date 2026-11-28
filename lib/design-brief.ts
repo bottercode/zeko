@@ -3,10 +3,11 @@ import { tokenValue } from './tokens'
 import type { Board, Frame, Task } from './types'
 
 export const DESIGN_BRIEF = [
-  'Start with the user’s main action and the content that supports it. Use realistic copy and the product’s known facts. Choose a typography scale, spacing rhythm, and image direction that fit this product.',
+  'Before designing, read get_guide with topic "design" (and "product-ui" for app screens); the canvas guidelines and the person’s words override it.',
+  'For a new screen or look, unless the guidelines already settle palette and type, open your reply with the short brief the guide describes (subject, world, palette, type, layout) before the first create_sketch.',
+  'Use realistic copy and the product’s known facts. Reuse canvas tokens and existing components where they fit, and keep repeated controls consistent.',
   'For a visual reference, inspect its rendered layout and identify the specific choices to carry over, such as hierarchy, density, color, or composition. Keep the reference intact. For website frames, use the source URL when you have browser access. If the reference is unavailable, say so.',
-  'Reuse canvas tokens and existing components where they fit. Keep repeated controls consistent, and check that important states and actions still work at the target viewport.',
-  'After the final visual change, check the rendered frame with screenshot_frame (use JPEG for ordinary review) and use inspect_frame when you need to diagnose clipping or overflow. Fix anything that blocks the primary task or hurts legibility before finishing.',
+  'After the final visual change, check the rendered frame with screenshot_frame (use JPEG for ordinary review) against the guide’s review checklist, and use inspect_frame to diagnose clipping or overflow. Fix what fails with targeted edits before finishing.',
 ].join('\n')
 
 export function designContext(board: Board, task: Task) {

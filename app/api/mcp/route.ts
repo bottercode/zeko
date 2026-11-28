@@ -7,7 +7,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import * as store from '@/lib/server/store'
 import type { Actor, Board, Frame, Task } from '@/lib/types'
 import { LIVE_FRAMES } from '@/lib/features'
-import { inspect, screenshot } from '@/lib/server/render'
+import { craftFindings, inspect, screenshot } from '@/lib/server/render'
 import { componentFromLayer, editLayers, inspectLayers, layerAttributes, layerRevision } from '@/lib/server/layers'
 import { checkSvg, compactImage, readSourceImage, sanitizeSvg } from '@/lib/server/assets'
 import { snapshotPage } from '@/lib/server/snapshot'
@@ -19,6 +19,7 @@ import { openDrift } from '@/lib/drift'
 import { MCP_AGENT_HEADER } from '@/lib/auth-access'
 import { stateMap } from '@/lib/state-map'
 import { DESIGN_BRIEF } from '@/lib/design-brief'
+import { DESIGN_GUIDES, DESIGN_GUIDE_TOPICS, guideTopicList, type DesignGuideTopic } from '@/lib/design-guide'
 
 /** Above this, a page sent in one piece kept the person waiting long enough to say so. */
 const STREAM_HINT_CHARS = 6000
@@ -29,6 +30,8 @@ Variants of one screen stack into a deck; the person flips through it and keeps 
 
 How to work:
 1. Call get_board first. You are on the canvas the person has open (list_canvases shows the rest). Read the guidelines, open tasks and comments marked for agents.
+   Before your first design work in a session, read get_guide({ topic: "design" }): Zeko's design method, with the
+   brief to write first and the review to run before you finish. Read it again if a long thread may have dropped it.
    The board lists installed skills by description. Read a matching or explicitly requested skill with get_skill before starting that work.
    Use the task’s pageId as page_id when creating sketches. Review pinned references and use approved frames for implementation handoff.
    Reuse design tokens with CSS var(--name) so sketches follow the canvas’s active theme.
@@ -298,7 +301,7 @@ const handler = createMcpHandler(
       {
         title: 'Create sketch',
         description:
-          'Add a sketch. For a new screen, set streaming: true and send only the shell first (head, styles and the first visible section) with a unique <!-- zeko:stream --> marker, then fill it in with append_to_sketch, so the person sees the frame at once and watches it build. Pass a whole document without streaming only for small frames. Set route and state so the frame lands in its screen’s row. Use variant_of to add to an existing frame’s deck.',
+          'Add a sketch. For a new screen, set streaming: true and send only the shell first (head, styles and the first visible section) with a unique <!-- zeko:stream --> marker, then fill it in with append_to_sketch, so the person sees the frame at once and watches it build. Pass a whole document without streaming only for small frames. Set route and state so the frame lands in its screen’s row. Use variant_of to add to an existing frame’s deck. Size it for the device unless told otherwise: desktop 1440x900, tablet 834x1194, phone 390x844 (get_guide "mobile" has a status bar to paste).',
         inputSchema: z.object({
           name: z.string().min(1).max(120),
           html: z.string().min(1),
@@ -498,7 +501,7 @@ const handler = createMcpHandler(
       {
         title: 'Screenshot frame',
         description:
-          'See a rendered sketch. Use JPEG for faster visual review or PNG for a lossless image. full_page captures the whole document instead of only the frame’s size.',
+          'See a rendered sketch, with automatic checks: fonts that failed to load, missing weights, text below WCAG AA contrast, text under 12px, and overflow. Fix every listed check. Use JPEG for faster visual review or PNG for a lossless image. full_page captures the whole document instead of only the frame’s size.',
         inputSchema: z.object({
           frame_id: z.string(),
           scale: z.number().min(0.25).max(2).default(1),
@@ -512,13 +515,16 @@ const handler = createMcpHandler(
         if (!f || f.kind !== 'sketch' || f.html === undefined) return fail(`No sketch ${args.frame_id}.`)
         touch(actor, `Checking ${f.name}`, f.id, true)
         try {
-          const image = await screenshot(withDesignTokens(f.html, getBoard().design), {
-            width: f.w, height: f.h, scale: args.scale, fullPage: args.full_page, format: args.format,
-          })
+          const html = withDesignTokens(f.html, getBoard().design)
+          const [image, findings] = await Promise.all([
+            screenshot(html, { width: f.w, height: f.h, scale: args.scale, fullPage: args.full_page, format: args.format }),
+            inspect(html, f.w, f.h, 1).then(craftFindings, () => []),
+          ])
+          const caption = `${f.name}, ${f.w}x${f.h}${args.full_page ? ', full page' : ''}`
           return {
             content: [
               { type: 'image' as const, data: image.toString('base64'), mimeType: `image/${args.format}` },
-              { type: 'text' as const, text: `${f.name}, ${f.w}x${f.h}${args.full_page ? ', full page' : ''}` },
+              { type: 'text' as const, text: findings.length ? `${caption}\nChecks to fix:\n- ${findings.join('\n- ')}` : `${caption}\nChecks passed: fonts loaded, text contrast, sizes and fit.` },
             ],
           }
         } catch (e) {
@@ -532,7 +538,7 @@ const handler = createMcpHandler(
       {
         title: 'Inspect frame',
         description:
-          'Measure a rendered sketch: each element’s box [x, y, width, height], its text, the fonts and colors in use, the content’s full height, and whether it overflows the frame. Paths like "0.2.1" are child indexes from <body>.',
+          'Measure a rendered sketch: each element’s box [x, y, width, height], its text, the fonts and colors in use, the content’s full height, whether it overflows the frame, and the craft checks (missingFonts, missingWeights, lowContrast, tinyText). Paths like "0.2.1" are child indexes from <body>.',
         inputSchema: z.object({ frame_id: z.string(), depth: z.number().int().min(1).max(12).default(6) }),
       },
       async (args: { frame_id: string; depth: number }) => {
@@ -1027,6 +1033,17 @@ const handler = createMcpHandler(
         const skill = getBoard().skills?.find((item) => item.id === skill_id)
         return skill ? text({ title: skill.title, description: skill.description, instructions: skill.text }) : fail('Skill not found on this canvas.')
       },
+    )
+
+    server.registerTool(
+      'get_guide',
+      {
+        title: 'Get guide',
+        description: `Read one of Zeko's design guides. Read "design" before designing; the others go deeper on one kind of work. The canvas guidelines and the person's own words override them. Topics:\n${guideTopicList()}`,
+        inputSchema: z.object({ topic: z.enum(DESIGN_GUIDE_TOPICS) }),
+        annotations: { readOnlyHint: true },
+      },
+      async ({ topic }: { topic: DesignGuideTopic }) => text(DESIGN_GUIDES[topic].text),
     )
 
     server.registerTool(

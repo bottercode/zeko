@@ -10,7 +10,7 @@ import { acpDeviceStatus, openRelaySession } from './acp-relay'
 import { currentWorkspace } from './store'
 
 const CANVAS_TOOLS = [
-  'get_board', 'get_frame', 'get_guidelines', 'get_skill', 'claim_task', 'complete_task', 'set_status',
+  'get_board', 'get_frame', 'get_guide', 'get_guidelines', 'get_skill', 'claim_task', 'complete_task', 'set_status',
   'create_sketch', 'get_layers', 'edit_layers', 'edit_sketch', 'append_to_sketch', 'fit_frame_to_content', 'inspect_frame', 'screenshot_frame',
 ]
 
